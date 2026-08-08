@@ -1,0 +1,99 @@
+using UnityEngine;
+
+namespace IntuitiveDesigns.CrystalCatch
+{
+    public enum CrystalColour { Blue, Green, Purple, Gold }
+
+    [RequireComponent(typeof(Collider))]
+    [RequireComponent(typeof(HomingMover))]
+    public class Crystal : MonoBehaviour
+    {
+        [Header("Identity (data)")]
+        [SerializeField] private CrystalColour colour = CrystalColour.Blue;
+        [SerializeField] private int value = 1;              // Blue 1 / Green 3 / Purple 5 / Gold 10
+
+        [Header("Feedback")]
+        [SerializeField] private AudioSource chime;          // Pitch scales with value (brighter = rarer)
+        [SerializeField] private ParticleSystem catchBurst;
+        [SerializeField] private float chimeMinPitch = 0.9f; // Low value crystals
+        [SerializeField] private float chimeMaxPitch = 1.6f; // High value crystals
+        [SerializeField] private int chimeValueForMaxPitch = 10; // Gold
+
+        public CrystalColour Colour => colour;
+        public int Value => value;
+
+        private CrystalSpawner _pool;
+        private HomingMover _mover;
+        private bool _consumed;
+
+        private void Awake()
+        {
+            _mover = GetComponent<HomingMover>();
+            _mover.Passed += OnPassedPlayer;   // Uncaught -> miss
+        }
+
+        private void OnDestroy()
+        {
+            if (_mover != null) _mover.Passed -= OnPassedPlayer;
+        }
+
+        public void Configure(CrystalSpawner pool) => _pool = pool;
+
+        /// Set the score value at spawn from the central economy (keeps tuning in one asset)
+        public void SetValue(int points) => value = points;
+
+        /// Called by the spawner right after enabling: aim this crystal at the player
+        public void Launch(Transform target, Vector3 startDir, float? speed = null)
+        {
+            _consumed = false;
+            _mover.Launch(target, startDir, speed);
+        }
+
+        /// Called by HandCollector when a hand touches this crystal
+        public void Collect(CrystalCatchGame game)
+        {
+            if (_consumed) return;
+            _consumed = true;
+            _mover.Stop();
+
+            game.AddScore(value);
+
+            // Feedback must be played by a DETACHED pooled effect: Despawn() below deactivates this
+            // GameObject in the same frame, which would silence a child AudioSource and kill a child
+            // ParticleSystem before either is ever seen or heard
+            if (CatchFXPool.Instance != null)
+            {
+                CatchFXPool.Instance.PlayCrystal(colour, transform.position, PitchForValue());
+            }
+            else
+            {
+                // Fallback for a scene with no FX pool
+                if (chime != null) { chime.pitch = PitchForValue(); chime.Play(); }
+                if (catchBurst != null) catchBurst.Play();
+            }
+            // NOTE: haptics aren't available in the Liminal SDK, audio + the
+            // burst carry the catch. Optional on controller flash via GetControllerVisual/PulseColor
+
+            Despawn();
+        }
+
+        private void OnPassedPlayer()
+        {
+            if (_consumed) return;   // Already caught this frame
+            Despawn();               // A clean miss, no penalty
+        }
+
+        // Higher value (rarer) crystals chime brighter, an audible value cue that reinforces the colour
+        private float PitchForValue()
+        {
+            float t = Mathf.InverseLerp(1f, Mathf.Max(2, chimeValueForMaxPitch), value);
+            return Mathf.Lerp(chimeMinPitch, chimeMaxPitch, t);
+        }
+
+        private void Despawn()
+        {
+            if (_pool != null) _pool.Return(this);
+            else gameObject.SetActive(false);
+        }
+    }
+}
