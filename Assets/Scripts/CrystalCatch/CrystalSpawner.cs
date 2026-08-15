@@ -8,19 +8,19 @@ namespace IntuitiveDesigns.CrystalCatch
     {
         [Header("Refs")]
         [SerializeField] private CrystalCatchGame game;
-        [SerializeField] private CrystalEconomy economy;     // Value curve + time-varying colour weights
-        [SerializeField] private Transform playerTarget;     // Player's catch zone (chest/head anchor), the centre
+        [SerializeField] private CrystalEconomy economy;     // Value curve + time varying colour weights
+        [SerializeField] private CartController cart;        // Supplies arc length position and speed
+        [SerializeField] private TrackPath track;            // Supplies where the track is ahead
 
-        [Header("Spawn ring (deck: 'from all directions', tuned for standing comfort")]
-        [SerializeField] private float spawnRadius = 2.2f;
-        [SerializeField] private float arcDegrees = 220f;
-        [SerializeField] private float spawnHeightMin = -0.3f;
-        [SerializeField] private float spawnHeightMax = 0.7f;
+        [Header("Drop placement (mine cart design)")]
+        [SerializeField] private float leadTime = 2.2f;
+        [SerializeField] private float minLeadDistance = 6f;
+        [SerializeField] private float ceilingHeight = 3f;
+        [SerializeField] private float swingHeight = 1.2f;
+        [SerializeField] private float lateralSpread = 1.1f;
 
-        [Header("Fly in")]
+        [Header("Concurrency")]
         [SerializeField] private int maxConcurrent = 6;
-        [SerializeField] private float launchSpeed = 1.1f;   // Controlled approach speed
-        [SerializeField] private float spreadAngle = 18f;
 
         [Header("Pooled prefabs (one per colour)")]
         [SerializeField] private Crystal[] crystalPrefabs;   // Blue, Green, Purple, Gold
@@ -29,8 +29,6 @@ namespace IntuitiveDesigns.CrystalCatch
         [Header("Special items (power ups + hazards)")]
         [SerializeField] private SpecialItem[] specialPrefabs;    // A mix, sorted into two pools by IsHazard
         [SerializeField] private int copiesPerSpecial = 3;
-        [Tooltip("Hazard share of specials over normalised time — rises late so the gold-flurry finish is " +
-                 "also the riskiest (ADR 0004).")]
         [SerializeField] private AnimationCurve hazardShare =
             new AnimationCurve(new Keyframe(0f, 0.15f), new Keyframe(1f, 0.5f));
 
@@ -47,7 +45,7 @@ namespace IntuitiveDesigns.CrystalCatch
         private bool _spawning;
         private Coroutine _loop;
 
-        /// <summary>Raised each time a crystal or item is emitted, so the core can pulse (CrystalCoreFX).</summary>
+        /// Raised each time a crystal or item is emitted, so the core can pulse (CrystalCoreFX)
         public event System.Action Emitted;
 
         private void Awake()
@@ -104,7 +102,7 @@ namespace IntuitiveDesigns.CrystalCatch
         {
             while (_spawning)
             {
-                _elapsedNorm = game.ElapsedNormalized;   // 0 at start → 1 at the final second
+                _elapsedNorm = game.ElapsedNormalized;   // 0 at start to 1 at the final second
 
                 if (Random.value < specialChance.Evaluate(_elapsedNorm))
                     EmitSpecial();
@@ -124,9 +122,11 @@ namespace IntuitiveDesigns.CrystalCatch
             if (_pools[c].Count == 0) return;      // Pool exhausted, skip rather than allocate
             var cr = _pools[c].Dequeue();
             cr.SetValue(economy.Points(colour));   // Value comes from the central economy
-            PlaceAround(cr.transform);
+
+            float fallSpeed, despawnY;
+            PlaceAhead(cr.transform, out fallSpeed, out despawnY);
             cr.gameObject.SetActive(true);
-            cr.Launch(playerTarget, LaunchDirection(cr.transform.position), launchSpeed);
+            cr.Launch(fallSpeed, despawnY, game);
             _active++;
             Emitted?.Invoke();                     // Core pulses on each emit (CrystalCoreFX)
         }
@@ -142,39 +142,41 @@ namespace IntuitiveDesigns.CrystalCatch
             if (queue.Count == 0) { EmitCrystal(); return; }
 
             var s = queue.Dequeue();
-            PlaceAround(s.transform);
+
+            float fallSpeed, despawnY;
+            PlaceAhead(s.transform, out fallSpeed, out despawnY);
             s.Configure(game, this);
             s.gameObject.SetActive(true);
-            s.Launch(playerTarget, LaunchDirection(s.transform.position), launchSpeed);
+            s.Launch(fallSpeed, despawnY, game);
             _active++;
             Emitted?.Invoke();
         }
 
         private bool AtCap => _active >= maxConcurrent;
 
-        // Place on a ring/shell around the player so items approach from all directions
-        // LaunchDirection then aims each one inward at the catch zone
-        private void PlaceAround(Transform t)
+        private void PlaceAhead(Transform t, out float fallSpeed, out float despawnY)
         {
-            Vector3 centre = playerTarget != null ? playerTarget.position : transform.position;
-            float half = arcDegrees * 0.5f * Mathf.Deg2Rad;   // Arc=360, full circle
-            float theta = Random.Range(-half, half);
-            Vector3 dir = new Vector3(Mathf.Sin(theta), 0f, Mathf.Cos(theta));
-            float h = Random.Range(spawnHeightMin, spawnHeightMax);
-            t.position = centre + dir * spawnRadius + Vector3.up * h;
-            t.rotation = Random.rotation;
-        }
+            fallSpeed = 0f;
+            despawnY = -50f;
+            if (track == null) { t.position = transform.position; return; }
 
-        // Heading from the spawn point toward the player, fanned by a random cone so crystals spread
-        // through the catch zone instead of stacking on one line
-        private Vector3 LaunchDirection(Vector3 from)
-        {
-            Vector3 toPlayer = (playerTarget != null ? playerTarget.position : from + Vector3.forward) - from;
-            if (toPlayer.sqrMagnitude < 1e-4f) toPlayer = Vector3.forward;
-            Quaternion spread = Quaternion.Euler(
-                Random.Range(-spreadAngle, spreadAngle),
-                Random.Range(-spreadAngle, spreadAngle), 0f);
-            return (spread * toPlayer).normalized;
+            float speed = cart != null ? cart.CurrentSpeed : 0f;
+            float here = cart != null ? cart.Distance : 0f;
+            float lead = Mathf.Max(minLeadDistance, speed * leadTime);
+            float d = Mathf.Min(here + lead, track.Length);
+
+            Vector3 basePos = track.PositionAt(d);
+            Vector3 right = track.RightAt(d);
+
+            float x = Random.Range(-lateralSpread, lateralSpread);
+            t.position = basePos + right * x + Vector3.up * ceilingHeight;
+            t.rotation = Random.rotation;
+
+            // Time the cart will actually take to cover the lead, so a slow cart gets a slow drop
+            float travelTime = speed > 0.05f ? lead / speed : leadTime;
+
+            fallSpeed = FallingMover.SpeedForIntercept(ceilingHeight, swingHeight, travelTime);
+            despawnY = basePos.y - 1.5f;
         }
 
         public void Return(Crystal cr)

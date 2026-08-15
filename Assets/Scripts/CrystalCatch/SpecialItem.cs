@@ -12,12 +12,16 @@ namespace IntuitiveDesigns.CrystalCatch
 
         // Hazards
         TimeDrainClock, // -15s
-        Bomb,           // Can't collect for 3s
-        SlowHourglass   // Slow Time impairs the player's catching (precision harder) for a few seconds
+        Bomb,           // Swings pass through for 3s (bat ghosts so it reads as inflicted, not broken)
+        SlowHourglass,  // Slow Time, slows the FALL, leaving items overhead and out of reach
+
+        // Power ups added for the bat design
+        ReachBoost,     // Longer bat
+        ArcBoost        // Wider swing arc
     }
 
     [RequireComponent(typeof(Collider))]
-    [RequireComponent(typeof(HomingMover))]
+    [RequireComponent(typeof(FallingMover))]
     public class SpecialItem : MonoBehaviour
     {
         [Header("Identity (data)")]
@@ -30,7 +34,12 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float scoreMultiplier = 2f; // ScoreGem
         [SerializeField] private float multiplierSeconds = 10f;
         [SerializeField] private int burstCount = 5;         // Crash Crystals
-        [SerializeField] private float handImpairSeconds = 4f; // Slow Time, precision catching window
+        [SerializeField] private float slowFallSeconds = 4f;  // Slow Time window
+        [SerializeField] private float slowFallScale = 0.45f; // How much the fall slows (below 1)
+        [SerializeField] private float reachMultiplier = 1.6f;
+        [SerializeField] private float reachSeconds = 10f;
+        [SerializeField] private float arcMultiplier = 2.0f;
+        [SerializeField] private float arcSeconds = 10f;
 
         [Header("Feedback")]
         [SerializeField] private AudioSource sfx;
@@ -43,12 +52,12 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private CrystalCatchGame _game;
         private CrystalSpawner _pool;
-        private HomingMover _mover;
+        private FallingMover _mover;
         private bool _consumed;
 
         private void Awake()
         {
-            _mover = GetComponent<HomingMover>();
+            _mover = GetComponent<FallingMover>();
             _mover.Passed += OnPassedPlayer;
         }
 
@@ -64,10 +73,10 @@ namespace IntuitiveDesigns.CrystalCatch
             _consumed = false;
         }
 
-        public void Launch(Transform target, Vector3 startDir, float? speed = null)
+        public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game)
         {
             _consumed = false;
-            _mover.Launch(target, startDir, speed);
+            _mover.Launch(fallSpeed, despawnY, game);
             if (approachCue != null) approachCue.Play();   // Telegraph incoming
         }
 
@@ -79,7 +88,14 @@ namespace IntuitiveDesigns.CrystalCatch
             else gameObject.SetActive(false);
         }
 
+        /// Legacy touch collection entry point, kept so the old HandCollector still compiles
         public void Collect(CrystalCatchGame game)
+        {
+            Hit(game, Vector3.zero);
+        }
+
+        /// Called by BatSwinger. A shielded swing at a hazard safely shatters it
+        public void Hit(CrystalCatchGame game, Vector3 hitVelocity)
         {
             if (_consumed) return;
             _consumed = true;
@@ -114,11 +130,13 @@ namespace IntuitiveDesigns.CrystalCatch
                 case SpecialKind.Shield:         g.SetShield(shieldSeconds); break;
                 case SpecialKind.ScoreGem:       g.SetScoreMultiplier(scoreMultiplier, multiplierSeconds); break;
                 case SpecialKind.CrashCrystals:  g.SpawnBurst(burstCount); break;
+                case SpecialKind.ReachBoost:     g.SetReachBoost(reachMultiplier, reachSeconds); break;
+                case SpecialKind.ArcBoost:       g.SetArcBoost(arcMultiplier, arcSeconds); break;
 
                 // Hazards — the manager no-ops these while shielded.
                 case SpecialKind.TimeDrainClock: g.ApplyHazardTime(-Mathf.Abs(timeDelta)); break;
                 case SpecialKind.Bomb:           g.DisableCollection(bombSeconds); break;
-                case SpecialKind.SlowHourglass:  g.ImpairHands(handImpairSeconds); break;
+                case SpecialKind.SlowHourglass:  g.SlowFalling(slowFallScale, slowFallSeconds); break;
             }
         }
     }
