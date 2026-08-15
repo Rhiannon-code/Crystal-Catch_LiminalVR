@@ -5,7 +5,7 @@ namespace IntuitiveDesigns.CrystalCatch
     public enum CrystalColour { Blue, Green, Purple, Gold }
 
     [RequireComponent(typeof(Collider))]
-    [RequireComponent(typeof(HomingMover))]
+    [RequireComponent(typeof(FallingMover))]
     public class Crystal : MonoBehaviour
     {
         [Header("Identity (data)")]
@@ -23,13 +23,13 @@ namespace IntuitiveDesigns.CrystalCatch
         public int Value => value;
 
         private CrystalSpawner _pool;
-        private HomingMover _mover;
+        private FallingMover _mover;
         private bool _consumed;
 
         private void Awake()
         {
-            _mover = GetComponent<HomingMover>();
-            _mover.Passed += OnPassedPlayer;   // Uncaught -> miss
+            _mover = GetComponent<FallingMover>();
+            _mover.Passed += OnPassedPlayer;   // Fell past the cart -> miss
         }
 
         private void OnDestroy()
@@ -42,15 +42,24 @@ namespace IntuitiveDesigns.CrystalCatch
         /// Set the score value at spawn from the central economy (keeps tuning in one asset)
         public void SetValue(int points) => value = points;
 
-        /// Called by the spawner right after enabling: aim this crystal at the player
-        public void Launch(Transform target, Vector3 startDir, float? speed = null)
+        /// Called by the spawner right after enabling: start this crystal falling from the ceiling.
+        /// fallSpeed comes from FallingMover.SpeedForIntercept so it arrives at swing height exactly
+        /// as the cart does
+        public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game)
         {
             _consumed = false;
-            _mover.Launch(target, startDir, speed);
+            _mover.Launch(fallSpeed, despawnY, game);
         }
 
-        /// Called by HandCollector when a hand touches this crystal
+        /// Legacy touch collection entry point, kept so the old HandCollector still compiles
         public void Collect(CrystalCatchGame game)
+        {
+            Hit(game, Vector3.zero);
+        }
+
+        /// Called by BatSwinger when the bat connects at sufficient swing speed
+        /// The crystal shatters on contact, it is not launched away
+        public void Hit(CrystalCatchGame game, Vector3 hitVelocity)
         {
             if (_consumed) return;
             _consumed = true;
@@ -58,7 +67,7 @@ namespace IntuitiveDesigns.CrystalCatch
 
             game.AddScore(value);
 
-            // Feedback must be played by a DETACHED pooled effect: Despawn() below deactivates this
+            // Feedback must be played by a DETACHED pooled effect, Despawn() below deactivates this
             // GameObject in the same frame, which would silence a child AudioSource and kill a child
             // ParticleSystem before either is ever seen or heard
             if (CatchFXPool.Instance != null)
@@ -71,7 +80,7 @@ namespace IntuitiveDesigns.CrystalCatch
                 if (chime != null) { chime.pitch = PitchForValue(); chime.Play(); }
                 if (catchBurst != null) catchBurst.Play();
             }
-            // NOTE: haptics aren't available in the Liminal SDK, audio + the
+            // NOTE, haptics aren't available in the Liminal SDK, audio + the
             // burst carry the catch. Optional on controller flash via GetControllerVisual/PulseColor
 
             Despawn();

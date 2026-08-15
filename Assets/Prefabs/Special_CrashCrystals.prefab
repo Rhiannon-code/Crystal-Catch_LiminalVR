@@ -10,8 +10,8 @@ GameObject:
   m_Component:
   - component: {fileID: 4923046760625029766}
   - component: {fileID: 233497830038845780}
-  - component: {fileID: 6533229868090817874}
   - component: {fileID: 4340625572416909759}
+  - component: {fileID: 285124409222705473}
   m_Layer: 0
   m_Name: Special_CrashCrystals
   m_TagString: Untagged
@@ -47,22 +47,6 @@ SphereCollider:
   serializedVersion: 2
   m_Radius: 0.05
   m_Center: {x: 0, y: 0, z: 0}
---- !u!114 &6533229868090817874
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 923673026070085622}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6c9492ba07afab1679804ed2590f117a, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  speed: 1.1
-  homingStrength: 2.5
-  maxLife: 6
-  passDistance: 0.12
 --- !u!114 &4340625572416909759
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -82,11 +66,30 @@ MonoBehaviour:
   scoreMultiplier: 2
   multiplierSeconds: 10
   burstCount: 5
-  handImpairSeconds: 4
+  slowFallSeconds: 4
+  slowFallScale: 0.45
+  reachMultiplier: 1.6
+  reachSeconds: 10
+  arcMultiplier: 2
+  arcSeconds: 10
   sfx: {fileID: 0}
   burst: {fileID: 0}
   approachCue: {fileID: 0}
   shieldBlockedCue: {fileID: 0}
+--- !u!114 &285124409222705473
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 923673026070085622}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 942997172d72d00abbc9e08312d6d827, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  spinDegreesPerSecond: 90
+  maxLife: 12
 --- !u!1 &7874791583609285935
 GameObject:
   m_ObjectHideFlags: 0
