@@ -31,6 +31,8 @@ namespace IntuitiveDesigns.CrystalCatch
             game.StateChanged += OnStateChanged;
             game.ScoreChanged += OnScoreChanged;
             game.MultiplierChanged += OnMultiplierChanged;
+            game.RoundEnded += OnRoundEnded;
+            game.RoundStarted += OnRoundStarted;
         }
 
         private void OnDisable()
@@ -41,6 +43,8 @@ namespace IntuitiveDesigns.CrystalCatch
             game.StateChanged -= OnStateChanged;
             game.ScoreChanged -= OnScoreChanged;
             game.MultiplierChanged -= OnMultiplierChanged;
+            game.RoundEnded -= OnRoundEnded;
+            game.RoundStarted -= OnRoundStarted;
         }
 
         private void Start()
@@ -82,6 +86,24 @@ namespace IntuitiveDesigns.CrystalCatch
         private void OnStateChanged(CrystalCatchGame.State s)
         {
             ShowPlayPanel(s == CrystalCatchGame.State.Playing);
+        }
+
+        /// Round over. Show what was scored and the running total, then get out of the way
+        private void OnRoundEnded(int roundScore, int total)
+        {
+            if (centerText == null) return;
+            centerText.text = "Round " + game.RoundNumber + "\n+" + roundScore.ToString("N0") +
+                              "\nTotal " + total.ToString("N0");
+        }
+
+        private void OnRoundStarted(int roundNumber)
+        {
+            _lastSecondShown = -1;   // Force the timer string to refresh for the new round
+            if (centerText == null) return;
+
+            // Round 1 is introduced by the 3-2-1 countdown, so it needs no banner of its own
+            if (roundNumber > 1) StartCoroutine(FlashCenter("Round " + roundNumber, 1.2f));
+            else centerText.text = string.Empty;
         }
 
         private void OnCountdownTick(int n)
