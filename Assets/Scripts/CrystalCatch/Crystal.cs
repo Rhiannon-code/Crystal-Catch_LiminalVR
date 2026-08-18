@@ -42,9 +42,6 @@ namespace IntuitiveDesigns.CrystalCatch
         /// Set the score value at spawn from the central economy (keeps tuning in one asset)
         public void SetValue(int points) => value = points;
 
-        /// Called by the spawner right after enabling: start this crystal falling from the ceiling.
-        /// fallSpeed comes from FallingMover.SpeedForIntercept so it arrives at swing height exactly
-        /// as the cart does
         public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game)
         {
             _consumed = false;
@@ -67,9 +64,6 @@ namespace IntuitiveDesigns.CrystalCatch
 
             game.AddScore(value);
 
-            // Feedback must be played by a DETACHED pooled effect, Despawn() below deactivates this
-            // GameObject in the same frame, which would silence a child AudioSource and kill a child
-            // ParticleSystem before either is ever seen or heard
             if (CatchFXPool.Instance != null)
             {
                 CatchFXPool.Instance.PlayCrystal(colour, transform.position, PitchForValue());

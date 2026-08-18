@@ -18,22 +18,29 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         private const float EffectHudWidth = 1000f;
         private const float EffectHudHeight = 600f;
         private const float EffectHudScale = 0.002f;
-
         private const float PickaxeGripFromButt = 0.074f;
         private const float PickaxeHeadFromTop = 0.083f;
 
         // Fallbacks, only used if the mesh cannot be read. Metres, at the pack's normal import scale
         private const float PickaxeGrip = -0.50f;
         private const float PickaxeHead = 0.214f;
-
-        // 4 m is the Loafbrr kit's module size, and it was already the ring spacing, so every ring
-        // is exactly one module deep and the pieces tile without a scale factor anywhere
         private const float RingLength = 4f;
-        private const float TunnelHalfWidth = 4.5f;
+        private const float TunnelHalfWidth = 10f;
+        private const float CeilingHeight = 12f;
+        private const float FrameHalfWidth = 3.2f;
+        private const float WallFrameInset = 0.3f;
+        private const int WallPostTiers = 3;
+        private const float SeamFillOffset = RingLength * 0.5f;
+        private const float SeamFillDepth = 0.06f;
+        private const int SurfaceRows = 2;
+        private const float CrystalDropHeight = 4f;
 
-        // Was 5.5 m of greybox box. Now it is the height the kit's wall panels actually are, so the
-        // walls meet the ceiling instead of stopping 1.3 m short of it
-        private const float CeilingHeight = 3.9f;
+        // Wall_Caves_A is 4.86 m tall, so three stacked reach 13 m and cover the roof line
+        private const float WallPanelHeight = 4.44f;
+        private const int WallTiers = 3;
+
+        // Half the cavern width in 4 m tiles, so floor and roof always reach the walls
+        private const int SurfaceTiles = 3;
 
         // The mine floor sits BELOW the track, so the rails rise to just under the cart rather than
         // through its floor
@@ -42,10 +49,20 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         private const string KitPrefabs = "Assets/LoafbrrAssets/MInesAndCaveSet/prefabs/";
         private const string KitModel = "Assets/LoafbrrAssets/MInesAndCaveSet/fbx/MinesSet.fbx";
         private const string RingMeshes = PrefabDir + "/TunnelRingMeshes.asset";
+        private const string RailPrefab = PrefabDir + "/TunnelRail.prefab";
+        private const string RailMeshes = PrefabDir + "/TunnelRailMeshes.asset";
+
+        // Must match TunnelBuilder.railSpacing, Rail_B is the kit's 2 m piece, so it tiles exactly
+        private const float RailSpacing = 2f;
+        private const string FramePrefab = PrefabDir + "/TunnelFrame.prefab";
+        private const string FrameMeshes = PrefabDir + "/TunnelFrameMeshes.asset";
+        private const float FrameSpacing = 16f;
+        private const float DuckBeamHeight = 1.25f;   // Underside of the low beam
+        private const float LeanIntrusion = 1.0f;     // How far the hanging rock crosses the centre
+        private const float LeanRockPivot = 3.9f;     // Puts its underside near head height
 
         // Measured off MinesSet.fbx. The kit is authored in metres with pivots on the module grid
         private const float FloorTileTop = 0.057f;    // Ground_Mines_A's surface, above its pivot
-        private const float CeilingRockDrop = 0.4f;   // How far Ground_Cave_A's rock hangs once flipped
         private const float PostHeight = 3.8f;        // Post_A
         private const float BeamHalfThickness = 0.1f; // Beam_A
 
@@ -67,6 +84,10 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             // Track first — everything else references it.
             var trackGo = new GameObject("Track");
             var track = trackGo.AddComponent<TrackPath>();
+
+            // Baked here, not left to Awake. The points serialize into the scene, so the track is
+            // visible and editable in the editor immediately and Play rides exactly what you see
+            track.Generate();
 
             var game = Object.FindObjectOfType<CrystalCatchGame>();
 
@@ -101,6 +122,8 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             SetRef(tunnel, "cart", cart);
             SetRef(tunnel, "track", track);
             SetRef(tunnel, "ringPrefab", ring);
+            SetRef(tunnel, "railPrefab", BuildRailPrefab());
+            SetRef(tunnel, "framePrefab", BuildFramePrefab());
 
             // Bat rides in the cart, following the right hand when one is tracked
             var bat = BuildBat(game, cartGo.transform);
@@ -114,12 +137,13 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 spawner.gameObject.SetActive(true);
                 SetRef(spawner, "cart", cart);
                 SetRef(spawner, "track", track);
-                SetFloat(spawner, "ceilingHeight", CeilingHeight - CeilingRockDrop);
+                // Deliberately NOT the cavern roof — see CrystalDropHeight
+                SetFloat(spawner, "ceilingHeight", CrystalDropHeight);
                 SetFloat(spawner, "swingHeight", SwingHeight);
                 SetFloat(spawner, "lateralSpread", LateralSpread);
 
-                Debug.Log("[CCCartBuilder] Spawner repointed at the track; drop height set to " +
-                          (CeilingHeight - CeilingRockDrop) + " m, just under the tunnel's rock ceiling.");
+                Debug.Log("[CCCartBuilder] Spawner repointed at the track; crystals drop from " +
+                          CrystalDropHeight + " m, independent of the " + CeilingHeight + " m roof.");
             }
             else
             {
@@ -140,6 +164,32 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 Debug.LogWarning("[CCCartBuilder] No CrystalCatchHUD found, HUD will not follow.");
             }
 
+            // Environmental hazards, pooled along the track like the tunnel itself
+            TrackObstacle leanLeft, leanRight;
+            var duck = BuildObstaclePrefabs(out leanLeft, out leanRight);
+
+            var obstacleGo = new GameObject("Obstacles");
+
+            // Measured across the countdown, so a duck asks the same MOVEMENT of every player rather
+            // than the same absolute height
+            var calibration = obstacleGo.AddComponent<PlayerHeightCalibration>();
+            SetRef(calibration, "cart", cart);
+
+            var obstacles = obstacleGo.AddComponent<TrackObstacles>();
+            SetRef(obstacles, "calibration", calibration);
+            SetRef(obstacles, "cart", cart);
+            SetRef(obstacles, "track", track);
+            if (game != null) SetRef(obstacles, "game", game);
+            SetRef(obstacles, "duckPrefab", duck);
+            SetRef(obstacles, "leanLeftPrefab", leanLeft);
+            SetRef(obstacles, "leanRightPrefab", leanRight);
+
+            // Desktop dodge testing. The emulator gives a camera you cannot crouch, so without this
+            // the duck and lean obstacles cannot be tested at all outside a headset
+            var dodge = obstacleGo.AddComponent<KeyboardTestDodge>();
+            if (rig != null) SetRef(dodge, "rig", rig);
+            SetDodgeTestExecutionOrder();
+
             BuildEffectHud(game);
 
             // The old touch collectors are superseded by the bat.
@@ -152,20 +202,14 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             Debug.Log("[CCCartBuilder] Built " + TargetScene +
                       "\n  procedural track + cart + pooled tunnel + bat (" + (bat != null ? bat.name : "none") + ")" +
                       "\n  " + migrated + " prefab(s) migrated to FallingMover" +
-                      "\n  ceiling " + CeilingHeight + " m, keep CrystalSpawner.ceilingHeight matching" +
+                      "\n  cavern " + (TunnelHalfWidth * 2f) + " m wide x " + CeilingHeight + " m tall" +
                       "\n  CrystalCatch.unity NOT modified.");
         }
 
-        private const string PreviewRoot = "TUNNEL PREVIEW (editor only)";
-
-        /// How much of the track the editor preview draws. Enough to read a style's character
-        /// without building thousands of rings
-        private const float PreviewMetres = 400f;
-
-        [MenuItem("Crystal Catch/Preview Tunnel In Editor")]
-        public static void PreviewTunnel()
+        [MenuItem("Crystal Catch/Bake Tunnel Along Full Track")]
+        public static void BakeTunnel()
         {
-            ClearPreview();
+            ClearBakedTunnel();
 
             var track = Object.FindObjectOfType<TrackPath>();
             if (track == null)
@@ -181,40 +225,96 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 return;
             }
 
-            // Generate now so the editor has the same track shape Play would produce. With seed = 0
-            // this is a DIFFERENT random track each time, set a non-zero seed to preview the real one
-            track.Generate();
-
-            var root = new GameObject(PreviewRoot);
-
-            // HARD CAP. The track is now kilometres long
-            float previewLength = Mathf.Min(track.Length, PreviewMetres);
-            int count = Mathf.FloorToInt(previewLength / RingLength);
-
-            for (int i = 0; i < count; i++)
+            // Only generate if there is nothing baked. Regenerating here would silently throw away
+            // any hand editing done through TrackPath's scene handles
+            if (!track.IsGenerated)
             {
-                float d = i * RingLength;
-                var go = (GameObject)PrefabUtility.InstantiatePrefab(ring, root.transform);
-                go.transform.position = track.PositionAt(d);
-                go.transform.rotation = track.RotationAt(d, true);
+                track.Generate();
+                EditorUtility.SetDirty(track);
             }
 
-            Debug.Log("[CCCartBuilder] Previewed " + count + " rings over the first " +
-                      previewLength.ToString("0") + " m of " + track.Length.ToString("0") + " m.\n" +
-                      "  EDITOR ONLY, clear it before saving (Crystal Catch > Clear Tunnel Preview).\n" +
-                      "  Seed 0 means Play generates a DIFFERENT track than this preview, set a " +
-                      "non zero seed to compare like for like.\n" +
-                      "  Select the Track object to see the full path as a cyan gizmo line.");
+            var root = new GameObject(TunnelBuilder.AuthoringRootName);
+
+            // Unity strips EditorOnly objects and their children at build time, so a baked tunnel
+            // can be committed and saved without ever reaching the headset
+            root.tag = "EditorOnly";
+
+            // Rail and frames are pooled at their own spacings at runtime, so the bake has to match
+            // or the authored view would show a tunnel the game does not actually have
+            var rail = AssetDatabase.LoadAssetAtPath<GameObject>(RailPrefab);
+
+            int count = Mathf.FloorToInt(track.Length / RingLength);
+
+            try
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    if (i % 64 == 0)
+                    {
+                        EditorUtility.DisplayProgressBar("Baking tunnel",
+                                                         "Section " + i + " of " + count,
+                                                         i / (float)count);
+                    }
+
+                    float d = i * RingLength;
+                    var go = (GameObject)PrefabUtility.InstantiatePrefab(ring, root.transform);
+                    go.name = "Section_" + i.ToString("0000");
+                    go.transform.position = track.PositionAt(d);
+                    go.transform.rotation = track.RotationAt(d, true);
+                }
+
+                if (rail != null)
+                {
+                    int rails = Mathf.FloorToInt(track.Length / RailSpacing);
+                    for (int i = 0; i < rails; i++)
+                    {
+                        float d = i * RailSpacing;
+                        var go = (GameObject)PrefabUtility.InstantiatePrefab(rail, root.transform);
+                        go.name = "Rail_" + i.ToString("0000");
+                        go.transform.position = track.PositionAt(d);
+                        go.transform.rotation = track.RotationAt(d, true);
+                    }
+                }
+
+                var frame = AssetDatabase.LoadAssetAtPath<GameObject>(FramePrefab);
+                if (frame != null)
+                {
+                    int frames = Mathf.FloorToInt(track.Length / FrameSpacing);
+                    for (int i = 0; i < frames; i++)
+                    {
+                        float d = i * FrameSpacing;
+                        var go = (GameObject)PrefabUtility.InstantiatePrefab(frame, root.transform);
+                        go.name = "Frame_" + i.ToString("0000");
+                        go.transform.position = track.PositionAt(d);
+                        go.transform.rotation = track.RotationAt(d, true);
+                    }
+                }
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+
+            EditorSceneManager.MarkSceneDirty(root.scene);
+
+            Debug.Log("[CCCartBuilder] Baked " + count + " tunnel sections over " +
+                      track.Length.ToString("0") + " m.\n" +
+                      "  Each section is a prefab instance: select one and edit it, or unpack it to " +
+                      "change that stretch on its own.\n" +
+                      "  EditorOnly, so builds strip it, and TunnelBuilder hides it on Play, the " +
+                      "runtime tunnel is still pooled rings, so hand edits here are look dev only " +
+                      "until we feed authored sections back into TunnelBuilder.\n" +
+                      "  Re-bake after changing the track shape, the sections do not follow it.");
         }
 
-        [MenuItem("Crystal Catch/Clear Tunnel Preview")]
-        public static void ClearPreview()
+        [MenuItem("Crystal Catch/Clear Baked Tunnel")]
+        public static void ClearBakedTunnel()
         {
-            var existing = GameObject.Find(PreviewRoot);
+            var existing = GameObject.Find(TunnelBuilder.AuthoringRootName);
             while (existing != null)
             {
                 Object.DestroyImmediate(existing);
-                existing = GameObject.Find(PreviewRoot);
+                existing = GameObject.Find(TunnelBuilder.AuthoringRootName);
             }
         }
 
@@ -364,9 +464,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 }
             }
 
-            // The mesh is authored +Y up. +90 on X lays the shaft down +Z, which leaves the pick
-            // blades in the vertical plane, the way a pick is actually held. Roll on Z to change it
-            // Position and scale stay BatSwinger's, it drives them every frame from reach
             visual.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
             return visual;
@@ -401,9 +498,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             MakeBox(parent, "Cart_Back", new Vector3(0f, 0.4f, -1.0f), new Vector3(1.4f, 0.9f, 0.1f), mat);
         }
 
-        /// The active effect readout, its own canvas, locked to the head rather than riding the
-        /// world panel, because the ask is for it to be in a fixed place on screen at all times
-        /// Power ups fill the top left corner, hazards the top right
         private static void BuildEffectHud(CrystalCatchGame game)
         {
             var existing = Object.FindObjectOfType<EffectStatusHUD>();
@@ -445,7 +539,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             loose.transform.SetParent(root.transform, false);
 
             BuildRingPieces(loose.transform);
-            CombineInto(root.transform, loose.transform);
+            CombineInto(root.transform, loose.transform, RingMeshes);
             Object.DestroyImmediate(loose);
 
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, RingPrefab);
@@ -457,47 +551,38 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         /// centreline, and the slice spans z = -2 to +2
         private static void BuildRingPieces(Transform parent)
         {
-            // Floor. Three 4 m tiles across, overlapping the 4 m grid slightly so no seam lines up
-            // with a ring boundary
-            for (int i = -1; i <= 1; i++)
-                PlaceKit(parent, "Ground/Ground_Mines_A", "Floor",
-                         new Vector3(i * 4f, FloorY - FloorTileTop, 0f), Quaternion.identity);
+            for (int row = 0; row < SurfaceRows; row++)
+                for (int i = -SurfaceTiles; i <= SurfaceTiles; i++)
+                    PlaceKit(parent, "Ground/Ground_Mines_A", "Floor_" + row + "_" + i,
+                             new Vector3(i * 4f,
+                                         FloorY - FloorTileTop - row * SeamFillDepth,
+                                         row * SeamFillOffset),
+                             Quaternion.identity);
 
-            // Ceiling. Cave ground tiles turned upside down, which is what makes it read as rock
-            // hanging over you rather than a lid. These are one sided too, facing +Y, so the flip
-            // is what points them down at the player as well as what puts the relief overhead
-            for (int i = -1; i <= 1; i++)
-                PlaceKit(parent, "Ground/Ground_Cave_A", "Ceiling",
-                         new Vector3(i * 4f, CeilingHeight, 0f), Quaternion.Euler(180f, 0f, 0f));
+            for (int row = 0; row < SurfaceRows; row++)
+                for (int i = -SurfaceTiles; i <= SurfaceTiles; i++)
+                    PlaceKit(parent, "Ground/Ground_Cave_A", "Ceiling_" + row + "_" + i,
+                             new Vector3(i * 4f,
+                                         CeilingHeight + row * SeamFillDepth,
+                                         row * SeamFillOffset),
+                             Quaternion.Euler(180f, 0f, 0f));
 
-            // Walls. Measured off the mesh: the panels run along their own X and are ONE SIDED,
-            // facing -Z (19.9 of face area on -Z, essentially none on +Z). Get the yaw backwards and
-            // they are not "wrong way round", they are invisible, culled from inside the tunnel
-            // -90 turns the face to +X for the left wall, +90 turns it to -X for the right
-            PlaceKit(parent, "Wall/Wall_Mines_A", "WallL",
-                     new Vector3(-TunnelHalfWidth, FloorY, 0f), Quaternion.Euler(0f, -90f, 0f));
-            PlaceKit(parent, "Wall/Wall_Mines_A", "WallR",
-                     new Vector3(TunnelHalfWidth, FloorY, 0f), Quaternion.Euler(0f, 90f, 0f));
+            for (int tier = 0; tier < WallTiers; tier++)
+            {
+                float y = FloorY + tier * WallPanelHeight;
 
-            // Rail, same yaw so its 4 m length runs down the track and its gauge sits across it
-            PlaceKit(parent, "Rails/Rail_A", "Rail",
-                     new Vector3(0f, FloorY, 0f), Quaternion.Euler(0f, 90f, 0f));
+                for (int row = 0; row < SurfaceRows; row++)
+                {
+                    float x = TunnelHalfWidth + row * SeamFillDepth;
+                    float z = row * SeamFillOffset;
 
-            // Support frame. This is the greybox ribs' real job, a smooth featureless tunnel
-            // produces almost no vection and you cannot tell you are moving, so something has to
-            // pass you at a steady rhythm. A post and beam set every 4 m is that, and it is what a
-            // mine would actually have
-            PlaceKit(parent, "Posts/Post_A", "PostL",
-                     new Vector3(-TunnelHalfWidth + 0.2f, FloorY, 0f), Quaternion.identity);
-            PlaceKit(parent, "Posts/Post_A", "PostR",
-                     new Vector3(TunnelHalfWidth - 0.2f, FloorY, 0f), Quaternion.identity);
+                    PlaceKit(parent, "Wall/Wall_Caves_A", "WallL_" + tier + "_" + row,
+                             new Vector3(-x, y, z), Quaternion.Euler(0f, -90f, 0f));
+                    PlaceKit(parent, "Wall/Wall_Caves_A", "WallR_" + tier + "_" + row,
+                             new Vector3(x, y, z), Quaternion.Euler(0f, 90f, 0f));
+                }
+            }
 
-            // Three 4 m beams overlapping into one 9.8 m span, so the ends bury themselves in the
-            // walls instead of stopping short of the posts
-            float beamY = FloorY + PostHeight + BeamHalfThickness;
-            PlaceKit(parent, "Posts/Beam_A", "Beam_L", new Vector3(-2.9f, beamY, 0f), Quaternion.identity);
-            PlaceKit(parent, "Posts/Beam_A", "Beam_M", new Vector3(0f, beamY, 0f), Quaternion.identity);
-            PlaceKit(parent, "Posts/Beam_A", "Beam_R", new Vector3(2.9f, beamY, 0f), Quaternion.identity);
         }
 
         private static void PlaceKit(Transform parent, string kitPath, string name,
@@ -517,8 +602,132 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             go.transform.localRotation = localRot;
         }
 
-        /// Merges every piece under `loose` into one child of `parent` per material
-        private static void CombineInto(Transform parent, Transform loose)
+        private static GameObject BuildFramePrefab()
+        {
+            EnsureModelReadable(KitModel);
+
+            var root = new GameObject("TunnelFrame");
+            var loose = new GameObject("Loose");
+            loose.transform.SetParent(root.transform, false);
+
+            float wallX = TunnelHalfWidth - WallFrameInset;
+
+            for (int tier = 0; tier < WallPostTiers; tier++)
+            {
+                float y = FloorY + tier * PostHeight;
+                PlaceKit(loose.transform, "Posts/Post_A", "PostL_" + tier,
+                         new Vector3(-wallX, y, 0f), Quaternion.identity);
+                PlaceKit(loose.transform, "Posts/Post_A", "PostR_" + tier,
+                         new Vector3(wallX, y, 0f), Quaternion.identity);
+            }
+
+            // Five 4 m beams overlapping into one 20 m span, wall to wall
+            float beamY = FloorY + WallPostTiers * PostHeight + BeamHalfThickness;
+            for (int i = -2; i <= 2; i++)
+                PlaceKit(loose.transform, "Posts/Beam_A", "Beam_" + (i + 2),
+                         new Vector3(i * 4f, beamY, 0f), Quaternion.identity);
+
+            CombineInto(root.transform, loose.transform, FrameMeshes);
+            Object.DestroyImmediate(loose);
+
+            var prefab = PrefabUtility.SaveAsPrefabAsset(root, FramePrefab);
+            Object.DestroyImmediate(root);
+            return prefab;
+        }
+
+        private static GameObject BuildRailPrefab()
+        {
+            EnsureModelReadable(KitModel);
+
+            var root = new GameObject("TunnelRail");
+            var loose = new GameObject("Loose");
+            loose.transform.SetParent(root.transform, false);
+
+            // Same yaw as the walls, so the piece's own X length runs down the track and its gauge
+            // sits across it
+            PlaceKit(loose.transform, "Rails/Rail_B", "Rail",
+                     new Vector3(0f, FloorY, 0f), Quaternion.Euler(0f, 90f, 0f));
+
+            CombineInto(root.transform, loose.transform, RailMeshes);
+            Object.DestroyImmediate(loose);
+
+            var prefab = PrefabUtility.SaveAsPrefabAsset(root, RailPrefab);
+            Object.DestroyImmediate(root);
+            return prefab;
+        }
+
+        private static TrackObstacle BuildObstaclePrefabs(out TrackObstacle leanLeft,
+                                                          out TrackObstacle leanRight)
+        {
+            EnsureModelReadable(KitModel);
+
+            var duck = BuildObstacle("Obstacle_DuckBeam", TrackObstacle.Kind.DuckBeam);
+            leanLeft = BuildObstacle("Obstacle_LeanLeft", TrackObstacle.Kind.LeanLeft);
+            leanRight = BuildObstacle("Obstacle_LeanRight", TrackObstacle.Kind.LeanRight);
+            return duck;
+        }
+
+        private static TrackObstacle BuildObstacle(string name, TrackObstacle.Kind kind)
+        {
+            var root = new GameObject(name);
+            var loose = new GameObject("Loose");
+            loose.transform.SetParent(root.transform, false);
+
+            Vector3 dangerCentre;
+            Vector3 dangerHalf;
+
+            if (kind == TrackObstacle.Kind.DuckBeam)
+            {
+                PlaceKit(loose.transform, "Posts/Post_A", "PostL",
+                         new Vector3(-FrameHalfWidth, FloorY, 0f), Quaternion.identity);
+                PlaceKit(loose.transform, "Posts/Post_A", "PostR",
+                         new Vector3(FrameHalfWidth, FloorY, 0f), Quaternion.identity);
+
+                float topY = FloorY + PostHeight + BeamHalfThickness;
+                PlaceKit(loose.transform, "Posts/Beam_A", "Beam_Top_L",
+                         new Vector3(-1.7f, topY, 0f), Quaternion.identity);
+                PlaceKit(loose.transform, "Posts/Beam_A", "Beam_Top_R",
+                         new Vector3(1.7f, topY, 0f), Quaternion.identity);
+
+                // The thing you actually duck under
+                PlaceKit(loose.transform, "Posts/Beam_A", "Beam_Low",
+                         new Vector3(0f, DuckBeamHeight + BeamHalfThickness, 0f), Quaternion.identity);
+
+                // Anything from the beam upward is a head that did not get down in time
+                dangerCentre = new Vector3(0f, DuckBeamHeight + 0.6f, 0f);
+                dangerHalf = new Vector3(2f, 0.6f, 0.3f);
+            }
+            else
+            {
+                // A rock hanging down on one side. It starts well above the cart's own walls, so it
+                // only ever threatens the player's HEAD, the cart never appears to clip through it
+                float side = kind == TrackObstacle.Kind.LeanLeft ? 1f : -1f;
+
+                PlaceKit(loose.transform, "Wall/Cave_Wall_Rocks_A", "Rock",
+                         new Vector3(side * LeanIntrusion, LeanRockPivot, 0f),
+                         Quaternion.Euler(0f, side * 90f, 0f));
+
+                // Cave_Wall_Rocks_A is 2.3 m across, so intruding 1.0 m leaves its inner edge just
+                // past the centreline: standing straight is a hit, leaning the other way is not
+                dangerCentre = new Vector3(side * 0.75f, 1.65f, 0f);
+                dangerHalf = new Vector3(0.9f, 0.55f, 0.4f);
+            }
+
+            CombineInto(root.transform, loose.transform, PrefabDir + "/" + name + "Meshes.asset");
+            Object.DestroyImmediate(loose);
+
+            var obstacle = root.AddComponent<TrackObstacle>();
+            SetEnum(obstacle, "kind", (int)kind);
+            SetVector(obstacle, "dangerCentre", dangerCentre);
+            SetVector(obstacle, "dangerHalfExtents", dangerHalf);
+
+            var prefab = PrefabUtility.SaveAsPrefabAsset(root, PrefabDir + "/" + name + ".prefab");
+            Object.DestroyImmediate(root);
+
+            return prefab != null ? prefab.GetComponent<TrackObstacle>() : null;
+        }
+
+        private static void CombineInto(Transform parent, Transform loose, string meshAssetPath)
         {
             var filters = loose.GetComponentsInChildren<MeshFilter>();
             var byMaterial = new System.Collections.Generic.Dictionary<Material,
@@ -546,13 +755,13 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
 
             if (byMaterial.Count == 0)
             {
-                Debug.LogWarning("[CCCartBuilder] No kit geometry combined, the tunnel will be empty.");
+                Debug.LogWarning("[CCCartBuilder] No kit geometry combined for " + meshAssetPath);
                 return;
             }
 
             // Combined meshes have to live in an asset or the prefab points at nothing once the
-            // build finishes. One file, one sub-asset per material
-            if (File.Exists(RingMeshes)) AssetDatabase.DeleteAsset(RingMeshes);
+            // build finishes. One file, one sub asset per material
+            if (File.Exists(meshAssetPath)) AssetDatabase.DeleteAsset(meshAssetPath);
             bool created = false;
 
             foreach (var pair in byMaterial)
@@ -564,12 +773,12 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
 
                 if (!created)
                 {
-                    AssetDatabase.CreateAsset(mesh, RingMeshes);
+                    AssetDatabase.CreateAsset(mesh, meshAssetPath);
                     created = true;
                 }
                 else
                 {
-                    AssetDatabase.AddObjectToAsset(mesh, RingMeshes);
+                    AssetDatabase.AddObjectToAsset(mesh, meshAssetPath);
                 }
 
                 var go = new GameObject(mesh.name);
@@ -579,7 +788,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             }
 
             AssetDatabase.SaveAssets();
-            Debug.Log("[CCCartBuilder] Tunnel ring combined into " + byMaterial.Count +
+            Debug.Log("[CCCartBuilder] " + meshAssetPath + " combined into " + byMaterial.Count +
                       " mesh(es), one per material.");
         }
 
@@ -689,6 +898,37 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 return;
             }
             prop.boolValue = value;
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        private static void SetDodgeTestExecutionOrder()
+        {
+            var script = MonoImporter.GetAllRuntimeMonoScripts();
+            for (int i = 0; i < script.Length; i++)
+            {
+                if (script[i] == null || script[i].GetClass() != typeof(KeyboardTestDodge)) continue;
+                if (MonoImporter.GetExecutionOrder(script[i]) == -100) return;
+
+                MonoImporter.SetExecutionOrder(script[i], -100);
+                return;
+            }
+        }
+
+        private static void SetEnum(Object target, string field, int value)
+        {
+            var so = new SerializedObject(target);
+            var prop = so.FindProperty(field);
+            if (prop == null) return;
+            prop.enumValueIndex = value;
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        private static void SetVector(Object target, string field, Vector3 value)
+        {
+            var so = new SerializedObject(target);
+            var prop = so.FindProperty(field);
+            if (prop == null) return;
+            prop.vector3Value = value;
             so.ApplyModifiedPropertiesWithoutUndo();
         }
 

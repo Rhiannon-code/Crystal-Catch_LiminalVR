@@ -50,9 +50,6 @@ namespace IntuitiveDesigns.CrystalCatch
             _speed = Mathf.MoveTowards(_speed, target, maxAcceleration * Time.deltaTime);
             _distance += _speed * Time.deltaTime;
 
-            // Endless rounds mean the cart never stops, so the track has to keep growing ahead of
-            // it. Extending early (rather than at the last metre) keeps the generation cost off the
-            // frame where the tunnel actually needs the geometry
             if (track != null) track.EnsureLength(_distance + trackLookahead);
 
             ApplyToTransform(false);

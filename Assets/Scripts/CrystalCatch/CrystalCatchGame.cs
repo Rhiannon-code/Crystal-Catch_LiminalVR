@@ -23,10 +23,6 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private CartController cart;
         [SerializeField] private float roundTallySeconds = 4f;
         [SerializeField] private float speedIncreasePerRound = 0.15f;
-
-        // Ceiling on the per round scale. CartController multiplies its base speed by this, and the
-        // product must stay under TrackPath.topSpeed or the generated curves exceed the 30 deg/sec
-        // yaw comfort limit. 4 m/s base x 2.0 = the 8 m/s the track was laid out for
         [SerializeField] private float maxSpeedScale = 2.0f;
 
         [Header("Scoring")]
@@ -78,10 +74,6 @@ namespace IntuitiveDesigns.CrystalCatch
             SwingsMiss,  // Bomb, collection disabled
             SlowFall     // Slow Time, items hang out of reach overhead
         }
-
-        /// Hazards read as "something is being done to you", power ups as "something is helping".
-        /// The HUD splits the two into opposite corners on this, so the rule lives here with the
-        /// other rules rather than being re-guessed in the UI
         public static bool IsHazardEffect(EffectKind kind)
         {
             return kind == EffectKind.SwingsMiss || kind == EffectKind.SlowFall;
@@ -157,9 +149,6 @@ namespace IntuitiveDesigns.CrystalCatch
             TimeRemaining = startSeconds;
             Multiplier = baseMultiplier;
 
-            // That reset is round-local scoring, but an effect the player earned seconds before the
-            // round boundary is still running on its own clock. Re-assert those, or the HUD counts
-            // down a score boost that the reset above has quietly already cancelled
             ReapplyActiveEffects();
 
             // Speed up for the new round. SetSpeedScale is safe to step, CartController's
@@ -244,11 +233,6 @@ namespace IntuitiveDesigns.CrystalCatch
             if (Spawner != null) Spawner.EmitBurst(count);
         }
 
-        // Bat power ups
-        // Timed like the score multiplier: set, wait, restore. Each keeps its own coroutine handle
-        // so re-collecting the same power up refreshes the duration instead of stacking timers that
-        // race to restore 1.0 while the other is still meant to be running
-
         public void SetReachBoost(float multiplier, float seconds)
         {
             BeginEffect(EffectKind.Reach, seconds, multiplier);
@@ -270,10 +254,7 @@ namespace IntuitiveDesigns.CrystalCatch
             if (IsShielded) return;
             BeginEffect(EffectKind.SlowFall, seconds, scale);
         }
-
-        /// Starts or REFRESHES a timed effect. Re-collecting the same pickup never stacks a second
-        /// timer, and the longer of the two windows wins so a fresh one cannot be cut short by an
-        /// older one expiring underneath it
+        
         private void BeginEffect(EffectKind kind, float seconds, float magnitude)
         {
             if (seconds <= 0f) return;
