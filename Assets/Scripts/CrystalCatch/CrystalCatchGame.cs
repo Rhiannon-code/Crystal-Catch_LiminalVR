@@ -23,7 +23,11 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private CartController cart;
         [SerializeField] private float roundTallySeconds = 4f;
         [SerializeField] private float speedIncreasePerRound = 0.15f;
-        [SerializeField] private float maxSpeedScale = 2.5f;
+
+        // Ceiling on the per round scale. CartController multiplies its base speed by this, and the
+        // product must stay under TrackPath.topSpeed or the generated curves exceed the 30 deg/sec
+        // yaw comfort limit. 4 m/s base x 2.0 = the 8 m/s the track was laid out for
+        [SerializeField] private float maxSpeedScale = 2.0f;
 
         [Header("Scoring")]
         [SerializeField] private float baseMultiplier = 1f;
@@ -64,6 +68,25 @@ namespace IntuitiveDesigns.CrystalCatch
         /// items still up near the ceiling as the cart passes under them, physically unreachable
         public float FallSpeedScale { get; private set; } = 1f;
 
+        /// Every effect that runs on a clock. Order is display order in the HUD
+        public enum EffectKind
+        {
+            Shield,      // Hazard immunity
+            ScoreBoost,  // Score multiplier
+            Reach,       // Longer pickaxe
+            Arc,         // Wider swing assist
+            SwingsMiss,  // Bomb, collection disabled
+            SlowFall     // Slow Time, items hang out of reach overhead
+        }
+
+        /// Hazards read as "something is being done to you", power ups as "something is helping".
+        /// The HUD splits the two into opposite corners on this, so the rule lives here with the
+        /// other rules rather than being re-guessed in the UI
+        public static bool IsHazardEffect(EffectKind kind)
+        {
+            return kind == EffectKind.SwingsMiss || kind == EffectKind.SlowFall;
+        }
+
         public event Action<int> ScoreChanged;
         public event Action<float> TimeChanged;
         public event Action<float> MultiplierChanged;
@@ -83,11 +106,23 @@ namespace IntuitiveDesigns.CrystalCatch
         // Set by the spawner so hazards/power ups can affect spawning through the manager
         public CrystalSpawner Spawner;
 
-        private Coroutine _multiplierRoutine;
-        private Coroutine _shieldRoutine;
-        private Coroutine _reachRoutine;
-        private Coroutine _arcRoutine;
-        private Coroutine _fallRoutine;
+        // One timer table instead of five coroutine handles. Coroutines could hold the CURRENT value
+        // of an effect but never how long was left on it, which is exactly what the HUD has to show
+        private const int EffectSlots = 6;
+        private readonly float[] _effectRemaining = new float[EffectSlots];
+        private readonly float[] _effectDuration = new float[EffectSlots];
+        private readonly float[] _effectMagnitude = new float[EffectSlots];
+
+        /// Seconds left on an effect, 0 when it is not running
+        public float EffectRemaining(EffectKind kind) { return _effectRemaining[(int)kind]; }
+
+        /// Full length the effect was last granted for. The HUD divides by this for its bar
+        public float EffectDuration(EffectKind kind) { return _effectDuration[(int)kind]; }
+
+        /// The effect's strength where it has one (x2 score, x1.6 reach), 0 where it does not
+        public float EffectMagnitude(EffectKind kind) { return _effectMagnitude[(int)kind]; }
+
+        public bool IsEffectActive(EffectKind kind) { return _effectRemaining[(int)kind] > 0f; }
 
         private void Start()
         {
@@ -122,6 +157,11 @@ namespace IntuitiveDesigns.CrystalCatch
             TimeRemaining = startSeconds;
             Multiplier = baseMultiplier;
 
+            // That reset is round-local scoring, but an effect the player earned seconds before the
+            // round boundary is still running on its own clock. Re-assert those, or the HUD counts
+            // down a score boost that the reset above has quietly already cancelled
+            ReapplyActiveEffects();
+
             // Speed up for the new round. SetSpeedScale is safe to step, CartController's
             // acceleration clamp ramps it, so this never reads as a jolt
             if (cart != null)
@@ -141,7 +181,7 @@ namespace IntuitiveDesigns.CrystalCatch
 
         /// A round's clock ran out. Bank the score, hold for a tally, then roll straight into the
         /// next round. Deliberately NO fade and NO ExperienceApp.End(), the cart keeps moving and
-        /// the track stays visible throughout.
+        /// the track stays visible throughout
         private IEnumerator EndRound()
         {
             SetState(State.RoundEnd);
@@ -157,6 +197,10 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private void Update()
         {
+            // Ticked in EVERY state, not just Playing. A shield picked up in the last second of a
+            // round has to keep running through the tally interlude, the way the coroutines did
+            TickEffects(Time.deltaTime);
+
             if (Current != State.Playing) return;
 
             TimeRemaining -= Time.deltaTime;
@@ -187,14 +231,12 @@ namespace IntuitiveDesigns.CrystalCatch
 
         public void SetShield(float seconds)
         {
-            if (_shieldRoutine != null) StopCoroutine(_shieldRoutine);
-            _shieldRoutine = StartCoroutine(TimedFlag(v => IsShielded = v, seconds));
+            BeginEffect(EffectKind.Shield, seconds, 0f);
         }
 
         public void SetScoreMultiplier(float multiplier, float seconds)
         {
-            if (_multiplierRoutine != null) StopCoroutine(_multiplierRoutine);
-            _multiplierRoutine = StartCoroutine(TimedMultiplier(multiplier, seconds));
+            BeginEffect(EffectKind.ScoreBoost, seconds, multiplier);
         }
 
         public void SpawnBurst(int count)
@@ -209,34 +251,95 @@ namespace IntuitiveDesigns.CrystalCatch
 
         public void SetReachBoost(float multiplier, float seconds)
         {
-            if (_reachRoutine != null) StopCoroutine(_reachRoutine);
-            _reachRoutine = StartCoroutine(TimedFloat(v => ReachMultiplier = v, multiplier, 1f, seconds));
+            BeginEffect(EffectKind.Reach, seconds, multiplier);
         }
 
         public void SetArcBoost(float multiplier, float seconds)
         {
-            if (_arcRoutine != null) StopCoroutine(_arcRoutine);
-            _arcRoutine = StartCoroutine(TimedFloat(v => ArcMultiplier = v, multiplier, 1f, seconds));
+            BeginEffect(EffectKind.Arc, seconds, multiplier);
         }
 
         // Called by hazards (all gated by the shield)
         public void ApplyHazardTime(float seconds)   { if (!IsShielded) AddTime(seconds); }        // Pass negative
-        public void DisableCollection(float seconds) { if (!IsShielded) StartCoroutine(TimedFlag(v => CollectionEnabled = v, seconds, invert: true)); }
+        public void DisableCollection(float seconds) { if (!IsShielded) BeginEffect(EffectKind.SwingsMiss, seconds, 0f); }
         public void ImpairHands(float seconds)       { if (!IsShielded) StartCoroutine(TimedFlag(v => HandsImpaired = v, seconds)); } // Legacy
 
         /// Slow Time. scale below 1 slows the fall, leaving items out of reach overhead
         public void SlowFalling(float scale, float seconds)
         {
             if (IsShielded) return;
-            if (_fallRoutine != null) StopCoroutine(_fallRoutine);
-            _fallRoutine = StartCoroutine(TimedFloat(v => FallSpeedScale = v, scale, 1f, seconds));
+            BeginEffect(EffectKind.SlowFall, seconds, scale);
         }
 
-        private IEnumerator TimedFloat(Action<float> set, float during, float after, float seconds)
+        /// Starts or REFRESHES a timed effect. Re-collecting the same pickup never stacks a second
+        /// timer, and the longer of the two windows wins so a fresh one cannot be cut short by an
+        /// older one expiring underneath it
+        private void BeginEffect(EffectKind kind, float seconds, float magnitude)
         {
-            set(during);
-            yield return new WaitForSeconds(seconds);
-            set(after);
+            if (seconds <= 0f) return;
+
+            int i = (int)kind;
+            _effectRemaining[i] = Mathf.Max(_effectRemaining[i], seconds);
+            _effectDuration[i] = _effectRemaining[i];
+            _effectMagnitude[i] = magnitude;
+            ApplyEffect(kind, true);
+        }
+
+        private void ReapplyActiveEffects()
+        {
+            for (int i = 0; i < EffectSlots; i++)
+                if (_effectRemaining[i] > 0f) ApplyEffect((EffectKind)i, true);
+        }
+
+        private void TickEffects(float deltaTime)
+        {
+            for (int i = 0; i < EffectSlots; i++)
+            {
+                if (_effectRemaining[i] <= 0f) continue;
+
+                _effectRemaining[i] -= deltaTime;
+                if (_effectRemaining[i] > 0f) continue;
+
+                // Clear the magnitude BEFORE restoring, ApplyEffect reads it for the on branch only
+                _effectRemaining[i] = 0f;
+                _effectDuration[i] = 0f;
+                _effectMagnitude[i] = 0f;
+                ApplyEffect((EffectKind)i, false);
+            }
+        }
+
+        /// The single place an effect is allowed to touch the values other systems read
+        private void ApplyEffect(EffectKind kind, bool active)
+        {
+            float magnitude = _effectMagnitude[(int)kind];
+
+            switch (kind)
+            {
+                case EffectKind.Shield:
+                    IsShielded = active;
+                    break;
+
+                case EffectKind.ScoreBoost:
+                    Multiplier = active ? magnitude : baseMultiplier;
+                    MultiplierChanged?.Invoke(Multiplier);
+                    break;
+
+                case EffectKind.Reach:
+                    ReachMultiplier = active ? magnitude : 1f;
+                    break;
+
+                case EffectKind.Arc:
+                    ArcMultiplier = active ? magnitude : 1f;
+                    break;
+
+                case EffectKind.SwingsMiss:
+                    CollectionEnabled = !active;
+                    break;
+
+                case EffectKind.SlowFall:
+                    FallSpeedScale = active ? magnitude : 1f;
+                    break;
+            }
         }
 
         private IEnumerator TimedFlag(Action<bool> set, float seconds, bool invert = false)
@@ -246,16 +349,7 @@ namespace IntuitiveDesigns.CrystalCatch
             set(!invert ? false : true);
         }
 
-        private IEnumerator TimedMultiplier(float m, float seconds)
-        {
-            Multiplier = m;
-            MultiplierChanged?.Invoke(Multiplier);
-            yield return new WaitForSeconds(seconds);
-            Multiplier = baseMultiplier;
-            MultiplierChanged?.Invoke(Multiplier);
-        }
-
-        /// Ends the whole experience and hands control back to the Liminal shell.
+        /// Ends the whole experience and hands control back to the Liminal shell
         public void EndExperience()
         {
             if (Current == State.Ended) return;

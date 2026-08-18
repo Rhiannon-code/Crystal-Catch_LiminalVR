@@ -25,10 +25,15 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float topSpeed = 8f;
         [SerializeField] private float maxGradient = 0.22f;
         [SerializeField] private float steeringChangeRate = 0.06f;
-        [SerializeField] private float verticalRange = 45f;]
+        [SerializeField] private float verticalRange = 45f;
         [SerializeField] private float straightLeadIn = 30f;
 
         private readonly List<Vector3> _points = new List<Vector3>();
+
+        /// The speed the curves were laid out for. Above this the generated yaw exceeds the
+        /// 30 deg/sec comfort limit, so CartController clamps itself to it rather than trusting
+        /// whoever tunes the round scaling to remember
+        public float TopSpeed { get { return topSpeed; } }
 
         public float Length { get { return Mathf.Max(0f, (_points.Count - 1) * pointSpacing); } }
         public bool IsGenerated { get { return _points.Count > 1; } }

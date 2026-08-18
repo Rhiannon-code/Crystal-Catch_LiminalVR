@@ -9,9 +9,8 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private TrackPath track;
         [SerializeField] private Transform carry;
 
-        [Header("Speed (data: m/s over normalised session time)")]
-        [SerializeField] private AnimationCurve speedOverTime =
-            new AnimationCurve(new Keyframe(0f, 3f), new Keyframe(1f, 8f));
+        [Header("Speed (data, m/s)")]
+        [SerializeField] private float baseSpeed = 4f;
 
         [SerializeField] private float maxAcceleration = 0.6f;
 
@@ -79,19 +78,29 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private float TargetSpeed()
         {
-            if (game == null) return speedOverTime.Evaluate(0f) * _speedScale;
+            if (game == null) return RoundSpeed();
 
             switch (game.Current)
             {
                 case CrystalCatchGame.State.Intro:
-                    return moveDuringIntro ? speedOverTime.Evaluate(0f) * _speedScale : 0f;
+                    return moveDuringIntro ? RoundSpeed() : 0f;
 
                 case CrystalCatchGame.State.Ended:
                     return brakeOnEnd ? 0f : _speed;
 
+                // Playing AND the between round tally, the cart never stops rolling
                 default:
-                    return speedOverTime.Evaluate(game.ElapsedNormalized) * _speedScale;
+                    return RoundSpeed();
             }
+        }
+
+        /// Flat for the whole round. Clamped to what the track was actually generated for, so a
+        /// round scale tuned too high can never outrun the curves' comfort budget
+        private float RoundSpeed()
+        {
+            float speed = baseSpeed * _speedScale;
+            if (track != null && track.TopSpeed > 0.01f) speed = Mathf.Min(speed, track.TopSpeed);
+            return speed;
         }
 
         /// Multiplier on the curve's speed, for anything that touches pace. Safe to call with a step
