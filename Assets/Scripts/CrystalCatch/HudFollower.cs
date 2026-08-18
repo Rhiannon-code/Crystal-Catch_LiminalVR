@@ -14,7 +14,7 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float heightOffset = -0.35f;
 
         [Header("Lazy follow")]
-        [SerializeField] private float yawDeadzoneDegrees = 35f;]
+        [SerializeField] private float yawDeadzoneDegrees = 35f;
         [SerializeField] private float followSmoothing = 3f;
         [SerializeField] private bool followHeadYaw = true;
 

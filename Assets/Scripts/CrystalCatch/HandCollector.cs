@@ -49,7 +49,7 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private void OnTriggerStay(Collider other)
         {
-            // Magnet: ease a very close crystal into the palm for a satisfying, reliable snap
+            // Magnet, ease a very close crystal into the palm for a satisfying, reliable snap
             if (magnetRadius <= 0f) return;
             if (game != null && game.HandsImpaired) return;   // No assist during Slow Time
             float d = Vector3.Distance(transform.position, other.transform.position);

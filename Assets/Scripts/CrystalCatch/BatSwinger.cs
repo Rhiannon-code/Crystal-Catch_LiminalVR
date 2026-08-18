@@ -19,6 +19,13 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float baseRadius = 0.05f;
         [SerializeField] private float assistMargin = 0.04f;
 
+        [Header("Model visual (data, model units along the shaft)")]
+        // The primitive capsule can be squashed to any length and radius. A real mesh cannot, so
+        // when batVisual is a model it gets scaled UNIFORMLY instead, using these two measurements
+        [SerializeField] private bool visualIsModel;
+        [SerializeField] private float modelGripAlongShaft = -0.50f;
+        [SerializeField] private float modelHeadAlongShaft = 0.214f;
+
         [Header("Swing gate (data)")]
         [SerializeField] private float minSwingSpeed = 1.6f;
         [SerializeField] private float speedSmoothing = 12f;
@@ -86,12 +93,6 @@ namespace IntuitiveDesigns.CrystalCatch
         {
             if (_hand == null)
             {
-                // Plain null checks throughout, never ?. on a UnityEngine.Object.
-                // CRITICAL: if the limb never resolves we must NOT simply return and leave the
-                // transform wherever it was. The emulator only exposes one 3DOF controller and the
-                // hand limbs frequently do not resolve at all, and with the cart driving away from
-                // the origin that stranded the bat kilometres behind the player, invisible
-                // Falling back to a fixed local offset keeps it in the cart and usable
                 var avatar = VRAvatar.Active;
                 if (avatar != null)
                 {
@@ -130,8 +131,12 @@ namespace IntuitiveDesigns.CrystalCatch
 
             if (batVisual != null)
             {
-                batVisual.localScale = new Vector3(radius * 2f, length * 0.5f, radius * 2f);
-                batVisual.localPosition = new Vector3(0f, 0f, length * 0.5f);
+                if (visualIsModel) ShapeModelVisual(length);
+                else
+                {
+                    batVisual.localScale = new Vector3(radius * 2f, length * 0.5f, radius * 2f);
+                    batVisual.localPosition = new Vector3(0f, 0f, length * 0.5f);
+                }
             }
 
             if (hitVolume != null)
@@ -142,6 +147,16 @@ namespace IntuitiveDesigns.CrystalCatch
                 hitVolume.center = new Vector3(0f, 0f, length * 0.5f);
                 hitVolume.isTrigger = true;
             }
+        }
+
+        private void ShapeModelVisual(float length)
+        {
+            float span = modelHeadAlongShaft - modelGripAlongShaft;
+            if (span <= 0.0001f) return;
+
+            float scale = length / span;
+            batVisual.localScale = new Vector3(scale, scale, scale);
+            batVisual.localPosition = new Vector3(0f, 0f, -modelGripAlongShaft * scale);
         }
 
         private Vector3 HeadPosition()
