@@ -35,7 +35,7 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private Material normalMaterial;
         [SerializeField] private Material ghostedMaterial;
 
-        public float SwingSpeed { get { return _swingSpeed; } }.
+        public float SwingSpeed { get { return _swingSpeed; } }
         public bool IsSwinging { get { return _swingSpeed >= minSwingSpeed; } }
         public bool IsHeld { get; private set; }
         public VRAvatarLimbType Hand { get { return hand; } }
