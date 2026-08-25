@@ -9,6 +9,7 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private CrystalCatchGame game;
         [SerializeField] private VRAvatarLimbType hand = VRAvatarLimbType.RightHand;
         [SerializeField] private bool followHandTransform = true;
+        [SerializeField] private bool startHeld = true;
         [SerializeField] private Vector3 fallbackLocalPosition = new Vector3(0.3f, 1.15f, 0.25f);
         [SerializeField] private Vector3 fallbackLocalEuler = new Vector3(-25f, 0f, 0f);
         [SerializeField] private Transform batVisual;
@@ -20,8 +21,6 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float assistMargin = 0.04f;
 
         [Header("Model visual (data, model units along the shaft)")]
-        // The primitive capsule can be squashed to any length and radius. A real mesh cannot, so
-        // when batVisual is a model it gets scaled UNIFORMLY instead, using these two measurements
         [SerializeField] private bool visualIsModel;
         [SerializeField] private float modelGripAlongShaft = -0.50f;
         [SerializeField] private float modelHeadAlongShaft = 0.214f;
@@ -36,12 +35,11 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private Material normalMaterial;
         [SerializeField] private Material ghostedMaterial;
 
-        /// Current smoothed speed of the bat head, m/s. Exposed for HUD/debug and MouseTestHand
         public float SwingSpeed { get { return _swingSpeed; } }
-
-        /// True when the bat is moving fast enough for contact to count.
         public bool IsSwinging { get { return _swingSpeed >= minSwingSpeed; } }
-
+        public bool IsHeld { get; private set; }
+        public VRAvatarLimbType Hand { get { return hand; } }
+        public Vector3 GripPosition { get { return transform.position; } }
         private Transform _hand;
         private Vector3 _lastHeadPos;
         private Vector3 _headVelocity;
@@ -51,23 +49,39 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private void Awake()
         {
+            IsHeld = startHeld;
             ApplyShape();
         }
 
         /// Set by a desktop test driver (MouseTestBat) so hand following does not fight it
         public bool ExternallyDriven { get; set; }
 
+        public void SetHeld(bool held)
+        {
+            IsHeld = held;
+            _hand = null;
+            _hasLastPos = false;
+            _swingSpeed = 0f;
+            _headVelocity = Vector3.zero;
+        }
+
+        public void AssignHand(VRAvatarLimbType limbType)
+        {
+            hand = limbType;
+            _hand = null;
+        }
+
         private void Update()
         {
-            if (followHandTransform && !ExternallyDriven) FollowHand();
+            if (!IsHeld) HoldFallbackPose();
+            else if (followHandTransform && !ExternallyDriven) FollowHand();
+
             ApplyShape();
             ApplyGhosting();
         }
 
         private void LateUpdate()
         {
-            // Sampled in LateUpdate so it measures the bat's FINAL position for the frame, after the
-            // hand follow above and after anything else that moves the rig
             Vector3 head = HeadPosition();
             Vector3 sample = motionReference != null ? motionReference.InverseTransformPoint(head) : head;
 
@@ -75,8 +89,6 @@ namespace IntuitiveDesigns.CrystalCatch
             {
                 Vector3 localVelocity = (sample - _lastHeadPos) / Time.deltaTime;
 
-                // Gate on the cart relative magnitude, report direction in world space so hit
-                // reactions still point the right way
                 _headVelocity = motionReference != null
                     ? motionReference.TransformVector(localVelocity)
                     : localVelocity;
@@ -110,8 +122,6 @@ namespace IntuitiveDesigns.CrystalCatch
             transform.SetPositionAndRotation(_hand.position, _hand.rotation);
         }
 
-        /// Where the bat sits when there is no tracked hand. Local to the parent, which the builder
-        /// makes the cart, so the bat rides along and stays visible even with no controller
         private void HoldFallbackPose()
         {
             if (transform.parent == null) return;
@@ -119,8 +129,6 @@ namespace IntuitiveDesigns.CrystalCatch
             transform.localRotation = Quaternion.Euler(fallbackLocalEuler);
         }
 
-        /// The bat runs along local +Z from the grip. Reach scales its length, Arc scales its radius,
-        /// and both come from the session manager so power up timers stay in one place
         private void ApplyShape()
         {
             float reach = game != null ? game.ReachMultiplier : 1f;
@@ -141,7 +149,7 @@ namespace IntuitiveDesigns.CrystalCatch
 
             if (hitVolume != null)
             {
-                hitVolume.direction = 2;                    // Z-aligned capsule
+                hitVolume.direction = 2;                    // Z aligned capsule
                 hitVolume.height = length + assistMargin * 2f;
                 hitVolume.radius = radius + assistMargin;
                 hitVolume.center = new Vector3(0f, 0f, length * 0.5f);
@@ -182,21 +190,34 @@ namespace IntuitiveDesigns.CrystalCatch
         {
             if (game == null) return;
 
-            // Bomb hazard, swings pass straight through
+            if (!IsHeld) return;
+
             if (!game.CollectionEnabled) return;
 
-            // The swing gate. Contact without speed is not a hit
             if (_swingSpeed < minSwingSpeed) return;
 
             var crystal = other.GetComponent<Crystal>();
             if (crystal != null)
             {
                 crystal.Hit(game, _headVelocity);
+                PulseOnHit();
                 return;
             }
 
             var special = other.GetComponent<SpecialItem>();
-            if (special != null) special.Hit(game, _headVelocity);
+            if (special != null)
+            {
+                special.Hit(game, _headVelocity);
+                PulseOnHit();
+            }
+        }
+
+        private void PulseOnHit()
+        {
+            if (HapticPulse.Instance == null) return;
+
+            float strength = Mathf.InverseLerp(minSwingSpeed, minSwingSpeed * 3f, _swingSpeed);
+            HapticPulse.Instance.Hit(hand, strength);
         }
 
 #if UNITY_EDITOR

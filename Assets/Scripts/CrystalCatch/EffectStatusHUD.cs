@@ -17,15 +17,10 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float sidePadding = 12f;
 
         [Header("Arrival")]
-        // A row that just fades in at the edge of vision is easy to miss while you are looking up
-        // at falling crystals. A row that pops is not
         [SerializeField] private float punchScale = 1.25f;
         [SerializeField] private float punchSeconds = 0.18f;
 
         [Header("Expiry warning")]
-        // The last few seconds pulse, so a power up running out is something you SAW coming rather
-        // than something that silently stopped being true. Gentle, a hard on/off flash in a headset
-        // is unpleasant at this size
         [SerializeField] private float warnSeconds = 3f;
         [SerializeField] private float warnPulsesPerSecond = 2.5f;
         [SerializeField] private float warnMinAlpha = 0.55f;
@@ -34,8 +29,6 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private Color backing = new Color(0.04f, 0.04f, 0.07f, 0.74f);
         [SerializeField] private float fillAlpha = 0.55f;
 
-        // Indexed by CrystalCatchGame.EffectKind. Wording carries the good/bad read as well as the
-        // side and the colour, so this still works for a colour blind player
         private static readonly string[] Names =
         {
             "SHIELD", "SCORE", "LONG PICK", "WIDE SWING", "SWINGS MISS", "SLOW FALL"
@@ -70,8 +63,6 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private void Awake()
         {
-            // An unwired reference used to mean the strip silently did nothing forever, which is
-            // indistinguishable from "no effect has fired yet". Find it, and say so if it is missing
             if (game == null)
             {
                 game = Object.FindObjectOfType<CrystalCatchGame>();
@@ -134,9 +125,6 @@ namespace IntuitiveDesigns.CrystalCatch
             float duration = game.EffectDuration(kind);
             float fraction = duration > 0.01f ? Mathf.Clamp01(remaining / duration) : 1f;
             row.Fill.sizeDelta = new Vector2(rowWidth * fraction, 0f);
-
-            // Both strings are rebuilt only when what they SAY changes. At 72 fps a per frame
-            // ToString on six rows is a steady stream of garbage for no visible difference
             int seconds = Mathf.CeilToInt(remaining);
             if (seconds != row.LastSecondShown)
             {
@@ -167,9 +155,6 @@ namespace IntuitiveDesigns.CrystalCatch
             return Mathf.Lerp(warnMinAlpha, 1f, wave);
         }
 
-        /// Magnitude is only worth showing where the player can act on the number. "SCORE x2" tells
-        /// you to swing at everything, "LONG PICK x1.6" is just noise on top of a pickaxe you can
-        /// already see has grown
         private static string LabelFor(CrystalCatchGame.EffectKind kind, float magnitude)
         {
             string name = Names[(int)kind];
@@ -214,8 +199,6 @@ namespace IntuitiveDesigns.CrystalCatch
             Stretch((RectTransform)backingGo.transform);
             AddImage(backingGo, backing);
 
-            // The bar drains toward the screen edge it is anchored to, so the two columns mirror
-            // each other instead of both sweeping the same way
             var fillGo = NewUIObject("Fill", row.Rect);
             row.Fill = (RectTransform)fillGo.transform;
             row.Fill.anchorMin = new Vector2(edge, 0f);

@@ -15,9 +15,6 @@ namespace IntuitiveDesigns.CrystalCatch
         private void LateUpdate()
         {
             if (_locked) return;
-
-            // Resolved lazily and re-tried every frame until it lands. The SDK spawns the rig at
-            // runtime, so on the first frames there is no head to parent to yet
             var head = ResolveHead();
             if (head == null) return;
 
@@ -31,8 +28,7 @@ namespace IntuitiveDesigns.CrystalCatch
         {
             if (headOverride != null) return headOverride;
 
-            // Don't use ?. on VRAvatar, it's a UnityEngine.Object, so null propagation bypasses
-            // Unity's overloaded == and would sail past a destroyed avatar
+
             var avatar = VRAvatar.Active;
             if (avatar != null)
             {

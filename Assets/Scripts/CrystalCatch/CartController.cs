@@ -79,20 +79,20 @@ namespace IntuitiveDesigns.CrystalCatch
 
             switch (game.Current)
             {
+                case CrystalCatchGame.State.WaitingForPickup:
+                    return 0f;
+
                 case CrystalCatchGame.State.Intro:
                     return moveDuringIntro ? RoundSpeed() : 0f;
 
                 case CrystalCatchGame.State.Ended:
                     return brakeOnEnd ? 0f : _speed;
 
-                // Playing AND the between round tally, the cart never stops rolling
                 default:
                     return RoundSpeed();
             }
         }
 
-        /// Flat for the whole round. Clamped to what the track was actually generated for, so a
-        /// round scale tuned too high can never outrun the curves' comfort budget
         private float RoundSpeed()
         {
             float speed = baseSpeed * _speedScale;
@@ -100,8 +100,6 @@ namespace IntuitiveDesigns.CrystalCatch
             return speed;
         }
 
-        /// Multiplier on the curve's speed, for anything that touches pace. Safe to call with a step
-        /// change, the acceleration clamp in Update ramps it regardless
         public void SetSpeedScale(float scale)
         {
             _speedScale = Mathf.Max(0f, scale);

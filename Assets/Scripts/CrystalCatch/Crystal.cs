@@ -38,24 +38,18 @@ namespace IntuitiveDesigns.CrystalCatch
         }
 
         public void Configure(CrystalSpawner pool) => _pool = pool;
-
-        /// Set the score value at spawn from the central economy (keeps tuning in one asset)
         public void SetValue(int points) => value = points;
-
         public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game)
         {
             _consumed = false;
             _mover.Launch(fallSpeed, despawnY, game);
         }
 
-        /// Legacy touch collection entry point, kept so the old HandCollector still compiles
         public void Collect(CrystalCatchGame game)
         {
             Hit(game, Vector3.zero);
         }
 
-        /// Called by BatSwinger when the bat connects at sufficient swing speed
-        /// The crystal shatters on contact, it is not launched away
         public void Hit(CrystalCatchGame game, Vector3 hitVelocity)
         {
             if (_consumed) return;
@@ -66,7 +60,7 @@ namespace IntuitiveDesigns.CrystalCatch
 
             if (CatchFXPool.Instance != null)
             {
-                CatchFXPool.Instance.PlayCrystal(colour, transform.position, PitchForValue());
+                CatchFXPool.Instance.PlayCrystal(colour, transform.position, PitchForValue(), hitVelocity);
             }
             else
             {
@@ -74,8 +68,6 @@ namespace IntuitiveDesigns.CrystalCatch
                 if (chime != null) { chime.pitch = PitchForValue(); chime.Play(); }
                 if (catchBurst != null) catchBurst.Play();
             }
-            // NOTE, haptics aren't available in the Liminal SDK, audio + the
-            // burst carry the catch. Optional on controller flash via GetControllerVisual/PulseColor
 
             Despawn();
         }

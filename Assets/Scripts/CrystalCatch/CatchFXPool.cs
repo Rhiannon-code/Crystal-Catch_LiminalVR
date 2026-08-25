@@ -21,6 +21,11 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private AudioClip catchClip;
         [SerializeField] private float volume = 0.7f;
 
+        [Header("Shatter direction")]
+        [SerializeField] private float shardVelocityScale = 0.6f;
+        [SerializeField] private float maxShardSpeed = 6f;
+        [SerializeField] private float minDirectionalSpeed = 0.2f;
+
         private readonly List<Queue<FxInstance>> _pools = new List<Queue<FxInstance>>();
         private Queue<FxInstance> _specialPool;
 
@@ -29,6 +34,7 @@ namespace IntuitiveDesigns.CrystalCatch
             public GameObject Go;
             public ParticleSystem Ps;
             public AudioSource Audio;
+            public ParticleSystem[] Children;
         }
 
         private void Awake()
@@ -72,8 +78,18 @@ namespace IntuitiveDesigns.CrystalCatch
                 src.spatialBlend = 1f;   // Positional, so catches read from where they happened
                 src.volume = volume;
 
+                // Children only, the root is handled separately and must not be biased twice
+                var nested = new List<ParticleSystem>(ps.GetComponentsInChildren<ParticleSystem>(true));
+                nested.Remove(ps);
+
                 ps.gameObject.SetActive(false);
-                q.Enqueue(new FxInstance { Go = ps.gameObject, Ps = ps, Audio = src });
+                q.Enqueue(new FxInstance
+                {
+                    Go = ps.gameObject,
+                    Ps = ps,
+                    Audio = src,
+                    Children = nested.ToArray()
+                });
             }
             return q;
         }
@@ -81,23 +97,34 @@ namespace IntuitiveDesigns.CrystalCatch
         /// Play the burst for a caught crystal. pitch carries the value cue (rarer = brighter)
         public void PlayCrystal(CrystalColour colour, Vector3 position, float pitch)
         {
+            PlayCrystal(colour, position, pitch, Vector3.zero);
+        }
+
+        public void PlayCrystal(CrystalColour colour, Vector3 position, float pitch, Vector3 hitVelocity)
+        {
             int i = (int)colour;
             if (i < 0 || i >= _pools.Count) return;
-            Play(_pools[i], position, pitch);
+            Play(_pools[i], position, pitch, hitVelocity);
         }
 
         /// Play the burst for a collected power up/hazard
         public void PlaySpecial(Vector3 position)
         {
-            Play(_specialPool, position, 1f);
+            PlaySpecial(position, Vector3.zero);
         }
 
-        private void Play(Queue<FxInstance> pool, Vector3 position, float pitch)
+        public void PlaySpecial(Vector3 position, Vector3 hitVelocity)
+        {
+            Play(_specialPool, position, 1f, hitVelocity);
+        }
+
+        private void Play(Queue<FxInstance> pool, Vector3 position, float pitch, Vector3 hitVelocity)
         {
             if (pool == null || pool.Count == 0) return;   // Exhausted, skip rather than allocate
 
             var fx = pool.Dequeue();
             fx.Go.transform.position = position;
+            AimShatter(fx, hitVelocity);
             fx.Go.SetActive(true);
             fx.Ps.Play(true);
 
@@ -109,6 +136,39 @@ namespace IntuitiveDesigns.CrystalCatch
             }
 
             StartCoroutine(ReturnAfter(pool, fx));
+        }
+
+        private void AimShatter(FxInstance fx, Vector3 hitVelocity)
+        {
+            float speed = hitVelocity.magnitude;
+            bool directional = speed >= minDirectionalSpeed;
+
+            fx.Go.transform.rotation = directional
+                ? Quaternion.LookRotation(hitVelocity / speed, Vector3.up)
+                : Quaternion.identity;
+
+            Vector3 drift = directional
+                ? Vector3.ClampMagnitude(hitVelocity * shardVelocityScale, maxShardSpeed)
+                : Vector3.zero;
+
+            ApplyDrift(fx.Ps, drift, directional);
+            for (int i = 0; i < fx.Children.Length; i++)
+                ApplyDrift(fx.Children[i], drift, directional);
+        }
+
+        private static void ApplyDrift(ParticleSystem ps, Vector3 drift, bool enable)
+        {
+            if (ps == null) return;
+
+            var vel = ps.velocityOverLifetime;
+
+            if (!enable) { vel.enabled = false; return; }
+
+            vel.enabled = true;
+            vel.space = ParticleSystemSimulationSpace.World;
+            vel.x = new ParticleSystem.MinMaxCurve(drift.x);
+            vel.y = new ParticleSystem.MinMaxCurve(drift.y);
+            vel.z = new ParticleSystem.MinMaxCurve(drift.z);
         }
 
         private IEnumerator ReturnAfter(Queue<FxInstance> pool, FxInstance fx)

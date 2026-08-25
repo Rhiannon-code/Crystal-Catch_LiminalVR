@@ -38,10 +38,13 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private void Update()
         {
-            // Deliberately Update, not LateUpdate. BatSwinger samples the bat head's position in
-            // LateUpdate to measure speed, so the move has to land BEFORE that sample, otherwise
-            // every swing is read a frame late and fast flicks get missed
             if (!Active) return;
+
+            if (_bat != null && !_bat.IsHeld)
+            {
+                _bat.ExternallyDriven = false;
+                return;
+            }
 
             if (_cam == null)
             {
@@ -71,7 +74,7 @@ namespace IntuitiveDesigns.CrystalCatch
             if (logSwingSpeed && _bat != null)
             {
                 Debug.Log("[MouseTestBat] swing " + _bat.SwingSpeed.ToString("0.00") + " m/s  " +
-                          (_bat.IsSwinging ? "HIT-CAPABLE" : "too slow"));
+                          (_bat.IsSwinging ? "HIT CAPABLE" : "too slow"));
             }
         }
     }

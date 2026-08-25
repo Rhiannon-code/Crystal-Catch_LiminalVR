@@ -13,38 +13,23 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private TrackObstacle duckPrefab;
         [SerializeField] private TrackObstacle leanLeftPrefab;
         [SerializeField] private TrackObstacle leanRightPrefab;
-
-        // Optional. Without it obstacles sit where they were authored, which is correct for a 1.6 m
-        // player and progressively wrong for anyone else
         [SerializeField] private PlayerHeightCalibration calibration;
+        [SerializeField] private CaveAtmosphere atmosphere;
 
         [Header("Placement (data, metres)")]
-        // Nothing in the opening stretch. The first seconds are for finding your feet, and the
-        // straight lead-in exists precisely so nothing is asked of the player yet
         [SerializeField] private float firstObstacleAt = 140f;
-
-        // At 8 m/s this is one every 8 to 18 seconds. Close enough to be a rhythm, far enough that
-        // a player who mistimed one is upright again well before the next
         [SerializeField] private float minGap = 65f;
         [SerializeField] private float maxGap = 145f;
-
         [SerializeField] private int seed = 4242;
         [SerializeField] private float visibleAhead = 140f;
         [SerializeField] private float visibleBehind = 12f;
 
         [Header("Pool")]
-        // Gap is at least 65 m and the view is 140 m, so three of any one kind in sight at once is
-        // already generous
         [SerializeField] private int poolPerKind = 3;
 
         [Header("Consequence")]
-        // A hazard you can walk through is scenery. Kept as a time penalty rather than anything
-        // harsher because the round clock is the resource this game is actually about
         [SerializeField] private float hitPenaltySeconds = 5f;
         [SerializeField] private Transform headOverride;
-
-        // Says HIT or CLEARED as each obstacle goes by. Without it, testing a dodge means watching
-        // the round clock and guessing whether the 5 s came off
         [SerializeField] private bool logResults = true;
 
         private readonly List<float> _distances = new List<float>();
@@ -66,6 +51,15 @@ namespace IntuitiveDesigns.CrystalCatch
                 Debug.LogWarning("[TrackObstacles] Missing cart or track, no obstacles will be placed.");
                 enabled = false;
                 return;
+            }
+
+            // An obstacle is long, so it has to be resident well before the fog would reveal it, or
+            // its leading edge appears mid-air as the cart arrives
+            if (atmosphere != null)
+            {
+                float sectionLength = duckPrefab != null ? duckPrefab.SectionHalfLength * 2f : 23f;
+                visibleAhead = atmosphere.DrawDistance + sectionLength;
+                visibleBehind = atmosphere.DrawDistance + sectionLength;
             }
 
             var prefabs = new[] { duckPrefab, leanLeftPrefab, leanRightPrefab };
@@ -171,8 +165,6 @@ namespace IntuitiveDesigns.CrystalCatch
             }
         }
 
-        /// Grows the obstacle course as the cart approaches the end of it. Endless rounds mean the
-        /// track itself keeps growing, so the hazards on it have to as well
         private void EnsureGeneratedTo(float required)
         {
             while (_generatedTo < required)

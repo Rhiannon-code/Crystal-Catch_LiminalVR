@@ -11,9 +11,12 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private CrystalEconomy economy;     // Value curve + time varying colour weights
         [SerializeField] private CartController cart;        // Supplies arc length position and speed
         [SerializeField] private TrackPath track;            // Supplies where the track is ahead
+        [SerializeField] private SpawnDirector director;
 
         [Header("Drop placement (mine cart design)")]
         [SerializeField] private float leadTime = 2.2f;
+        [SerializeField] private float interceptLead = 2.5f;
+        [SerializeField] private float minFallTime = 0.5f;
         [SerializeField] private float minLeadDistance = 6f;
         [SerializeField] private float ceilingHeight = 3f;
         [SerializeField] private float swingHeight = 1.2f;
@@ -36,6 +39,14 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private AnimationCurve spawnInterval = AnimationCurve.Linear(0, 0.6f, 1, 0.55f);
         [SerializeField] private AnimationCurve specialChance = AnimationCurve.Linear(0, 0.05f, 1, 0.18f);
 
+        [Header("Lead in (data)")]
+        [SerializeField] private float leadInSeconds = 3f;
+        [SerializeField] private float minCartSpeed = 2.5f;
+        [SerializeField] private float maxSpeedWait = 8f;
+
+        // How far past the emit horizon the schedule is kept generated
+        [SerializeField] private float scheduleHeadroom = 60f;
+
         // Colour selection + value now live in the CrystalEconomy asset (the 'richer late game' arc)
         private Queue<Crystal>[] _pools;
         private Queue<SpecialItem> _powerUpQueue;
@@ -44,8 +55,6 @@ namespace IntuitiveDesigns.CrystalCatch
         private int _active;                                 // In flight crystals + items
         private bool _spawning;
         private Coroutine _loop;
-
-        /// Raised each time a crystal or item is emitted, so the core can pulse (CrystalCoreFX)
         public event System.Action Emitted;
 
         private void Awake()
@@ -80,11 +89,13 @@ namespace IntuitiveDesigns.CrystalCatch
             }
         }
 
-        public void StartSpawning()
+        public void StartSpawning() { StartSpawning(false); }
+
+        public void StartSpawning(bool withLeadIn)
         {
             if (_spawning) return;
             _spawning = true;
-            _loop = StartCoroutine(SpawnLoop());
+            _loop = StartCoroutine(SpawnLoop(withLeadIn ? leadInSeconds : 0f));
         }
 
         public void StopSpawning()
@@ -98,7 +109,40 @@ namespace IntuitiveDesigns.CrystalCatch
             for (int i = 0; i < count; i++) EmitCrystal();
         }
 
-        private IEnumerator SpawnLoop()
+        private IEnumerator SpawnLoop(float leadIn)
+        {
+            if (leadIn > 0f) yield return new WaitForSeconds(leadIn);
+
+            yield return WaitForRollingCart();
+
+            if (director != null) yield return ScheduledLoop();
+            else yield return LegacyLoop();
+        }
+
+        private IEnumerator ScheduledLoop()
+        {
+            while (_spawning)
+            {
+                _elapsedNorm = game.ElapsedNormalized;
+
+                float here = cart != null ? cart.Distance : 0f;
+                float speed = cart != null ? cart.CurrentSpeed : 0f;
+                float lead = Mathf.Max(minLeadDistance, speed * leadTime);
+
+                // Generated well past the horizon so growing the schedule never coincides with
+                // needing to read from it
+                director.EnsureScheduledTo(here + lead + scheduleHeadroom);
+
+                ScheduledItem item;
+                while (!AtCap && director.TryTake(here + lead, out item))
+                    Emit(item, here, speed);
+
+                yield return null;
+            }
+        }
+
+        /// The pre-director behaviour, roll a kind on a timer, drop it a fixed lead ahead
+        private IEnumerator LegacyLoop()
         {
             while (_spawning)
             {
@@ -112,6 +156,38 @@ namespace IntuitiveDesigns.CrystalCatch
                 float interval = spawnInterval.Evaluate(_elapsedNorm);
                 yield return new WaitForSeconds(interval);
             }
+        }
+
+        private void Emit(ScheduledItem item, float here, float speed)
+        {
+            switch (item.Kind)
+            {
+                case SpawnSlotKind.Crystal:
+                    EmitCrystalAt(item, here, speed);
+                    break;
+
+                default:
+                    EmitSpecialAt(item, here, speed);
+                    break;
+            }
+        }
+
+        private IEnumerator WaitForRollingCart()
+        {
+            if (cart == null) yield break;
+
+            float waited = 0f;
+            while (_spawning && cart.CurrentSpeed < minCartSpeed && waited < maxSpeedWait)
+            {
+                waited += Time.deltaTime;
+                yield return null;
+            }
+
+            if (waited >= maxSpeedWait)
+                Debug.LogWarning("[CrystalSpawner] Cart never reached minCartSpeed (" + minCartSpeed +
+                                 " m/s) in " + maxSpeedWait + " s, it is at " +
+                                 cart.CurrentSpeed.ToString("0.0") + ". Spawning anyway, but drops " +
+                                 "will land short of the cart. Lower minCartSpeed or raise cart speed.");
         }
 
         private void EmitCrystal()
@@ -150,6 +226,72 @@ namespace IntuitiveDesigns.CrystalCatch
             s.Launch(fallSpeed, despawnY, game);
             _active++;
             Emitted?.Invoke();
+        }
+
+        private void EmitCrystalAt(ScheduledItem item, float here, float speed)
+        {
+            CrystalColour colour = item.ForceColour
+                ? item.Colour
+                : economy.WeightedColour(_elapsedNorm);
+
+            int c = (int)colour;
+            if (c < 0 || c >= _pools.Length || _pools[c].Count == 0) return;
+
+            var cr = _pools[c].Dequeue();
+            cr.SetValue(economy.Points(colour));
+
+            float fallSpeed, despawnY;
+            PlaceAt(cr.transform, item.Distance, item.Lateral, here, speed, out fallSpeed, out despawnY);
+
+            cr.gameObject.SetActive(true);
+            cr.Launch(fallSpeed, despawnY, game);
+            _active++;
+            Emitted?.Invoke();
+        }
+
+        private void EmitSpecialAt(ScheduledItem item, float here, float speed)
+        {
+            bool wantHazard = item.Kind == SpawnSlotKind.Hazard;
+
+            var queue = wantHazard ? _hazardQueue : _powerUpQueue;
+            if (queue.Count == 0) queue = wantHazard ? _powerUpQueue : _hazardQueue;
+            if (queue.Count == 0) { EmitCrystalAt(item, here, speed); return; }
+
+            var s = queue.Dequeue();
+
+            float fallSpeed, despawnY;
+            PlaceAt(s.transform, item.Distance, item.Lateral, here, speed, out fallSpeed, out despawnY);
+
+            s.Configure(game, this);
+            s.gameObject.SetActive(true);
+            s.Launch(fallSpeed, despawnY, game);
+            _active++;
+            Emitted?.Invoke();
+        }
+
+        private void PlaceAt(Transform t, float distance, float lateral, float here, float speed,
+                             out float fallSpeed, out float despawnY)
+        {
+            fallSpeed = 0f;
+            despawnY = -50f;
+            if (track == null) { t.position = transform.position; return; }
+
+            float d = Mathf.Min(distance, track.Length);
+
+            Vector3 basePos = track.PositionAt(d);
+            Vector3 right = track.RightAt(d);
+
+            t.position = basePos + right * (Mathf.Clamp(lateral, -1f, 1f) * lateralSpread)
+                       + Vector3.up * ceilingHeight;
+            t.rotation = Random.rotation;
+
+            float interceptAt = d - Mathf.Max(0f, interceptLead);
+            float remaining = Mathf.Max(0f, interceptAt - here);
+            float travelTime = speed > 0.05f ? remaining / speed : leadTime;
+            travelTime = Mathf.Max(travelTime, minFallTime);
+
+            fallSpeed = FallingMover.SpeedForIntercept(ceilingHeight, swingHeight, travelTime);
+            despawnY = basePos.y - 1.5f;
         }
 
         private bool AtCap => _active >= maxConcurrent;

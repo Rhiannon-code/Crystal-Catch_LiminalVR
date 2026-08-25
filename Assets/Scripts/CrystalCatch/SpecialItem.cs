@@ -109,7 +109,7 @@ namespace IntuitiveDesigns.CrystalCatch
             // child ParticleSystem/AudioSource would be killed before it played
             if (!blocked && CatchFXPool.Instance != null)
             {
-                CatchFXPool.Instance.PlaySpecial(transform.position);
+                CatchFXPool.Instance.PlaySpecial(transform.position, hitVelocity);
             }
             else
             {
@@ -133,7 +133,7 @@ namespace IntuitiveDesigns.CrystalCatch
                 case SpecialKind.ReachBoost:     g.SetReachBoost(reachMultiplier, reachSeconds); break;
                 case SpecialKind.ArcBoost:       g.SetArcBoost(arcMultiplier, arcSeconds); break;
 
-                // Hazards — the manager no-ops these while shielded.
+                // Hazards, the manager no-ops these while shielded
                 case SpecialKind.TimeDrainClock: g.ApplyHazardTime(-Mathf.Abs(timeDelta)); break;
                 case SpecialKind.Bomb:           g.DisableCollection(bombSeconds); break;
                 case SpecialKind.SlowHourglass:  g.SlowFalling(slowFallScale, slowFallSeconds); break;

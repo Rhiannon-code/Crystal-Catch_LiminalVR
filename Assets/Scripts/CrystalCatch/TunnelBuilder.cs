@@ -10,6 +10,7 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private GameObject ringPrefab;
         [SerializeField] private GameObject railPrefab;
         [SerializeField] private GameObject framePrefab;
+        [SerializeField] private CaveAtmosphere atmosphere;
 
         public const string AuthoringRootName = "TUNNEL (editor authoring)";
 
@@ -19,7 +20,6 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float visibleBehind = 12f;
 
         [Header("Frames")]
-        // 16 m, so one passes every 2 seconds at top speed rather than two every second
         [SerializeField] private float frameSpacing = 16f;
 
         [Header("Rail")]
@@ -48,6 +48,14 @@ namespace IntuitiveDesigns.CrystalCatch
             }
 
             if (!track.IsGenerated) track.Generate();
+
+            // Before the pools are built, because their array sizes come from these
+            if (atmosphere != null)
+            {
+                visibleAhead = atmosphere.DrawDistance;
+                visibleBehind = atmosphere.DrawDistance;
+                railVisibleAhead = atmosphere.DrawDistance;
+            }
 
             HideAuthoredTunnel();
 
@@ -80,15 +88,14 @@ namespace IntuitiveDesigns.CrystalCatch
         }
 
         /// The baked tunnel is an authoring aid, not the shipping tunnel. It is tagged EditorOnly so
-        /// a build strips it, and switched off here as well so pressing Play in the editor gives the
-        /// same pooled tunnel the headset gets rather than 1250 live ring objects
+        /// a build strips it
         private void HideAuthoredTunnel()
         {
             var authored = GameObject.Find(AuthoringRootName);
             if (authored == null) return;
 
             authored.SetActive(false);
-            Debug.Log("[TunnelBuilder] Editor-authored tunnel hidden for play, pooled rings in use.");
+            Debug.Log("[TunnelBuilder] Editor authored tunnel hidden for play, pooled rings in use.");
         }
 
         private void LateUpdate()

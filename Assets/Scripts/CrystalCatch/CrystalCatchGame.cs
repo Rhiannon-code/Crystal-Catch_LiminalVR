@@ -8,9 +8,7 @@ namespace IntuitiveDesigns.CrystalCatch
 {
     public class CrystalCatchGame : MonoBehaviour
     {
-        /// RoundEnd is the tally interlude BETWEEN rounds. The cart keeps rolling through it and the
-        /// view is never blacked out, the ride is continuous
-        public enum State { Intro, Playing, RoundEnd, Ended }
+        public enum State { WaitingForPickup, Intro, Playing, RoundEnd, Ended }
 
         [Header("Session (data, not magic numbers)")]
         [SerializeField] private float startSeconds = 60f;   // Length of ONE round
@@ -25,46 +23,29 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float speedIncreasePerRound = 0.15f;
         [SerializeField] private float maxSpeedScale = 2.0f;
 
+        [Header("Start")]
+        [SerializeField] private bool requirePickupToStart = true;
+
         [Header("Scoring")]
         [SerializeField] private float baseMultiplier = 1f;
 
-        public State Current { get; private set; } = State.Intro;
+        public State Current { get; private set; } = State.WaitingForPickup;
         public float TimeRemaining { get; private set; }
-
-        /// Score for the CURRENT round only. Resets each round
         public int Score { get; private set; }
-
-        /// Running total across all COMPLETED rounds. Score is added to this at each round end
         public int TotalScore { get; private set; }
-
-        /// 1-based. Increments as each new round starts
         public int RoundNumber { get; private set; }
-
         public float Multiplier { get; private set; }
-
-        /// Full session length in seconds (60 s). Used by the spawner's pacing curves
         public float StartSeconds => startSeconds;
-
-        /// 0 at session start to 1 at the final second. Drives the richer late game value ramp
         public float ElapsedNormalized =>
             startSeconds <= 0f ? 0f : 1f - Mathf.Clamp01(TimeRemaining / startSeconds);
 
-        // Flags other systems query. Kept here so all rules live in one place
         public bool IsShielded { get; private set; }
         public bool CollectionEnabled { get; private set; } = true;
         public bool HandsImpaired { get; private set; }   // Legacy catch era flag, kept for HandCollector
-
-        /// Bat length multiplier. The Reach power up drives this above 1
         public float ReachMultiplier { get; private set; } = 1f;
-
-        /// Bat radius multiplier, a wider swing arc. The Arc power up drives this above 1
         public float ArcMultiplier { get; private set; } = 1f;
-
-        /// Multiplier on how fast items fall. The Slow Time hazard drives this BELOW 1, which leaves
-        /// items still up near the ceiling as the cart passes under them, physically unreachable
         public float FallSpeedScale { get; private set; } = 1f;
 
-        /// Every effect that runs on a clock. Order is display order in the HUD
         public enum EffectKind
         {
             Shield,      // Hazard immunity
@@ -83,52 +64,52 @@ namespace IntuitiveDesigns.CrystalCatch
         public event Action<float> TimeChanged;
         public event Action<float> MultiplierChanged;
         public event Action<State> StateChanged;
-
-        // Session flow signals for the HUD
         public event Action<int> CountdownTick;   // 3, 2, 1
         public event Action CountdownGo;          // GO
         public event Action<int> FinalScore;      // Only fired by an explicit EndExperience()
-
-        /// (roundScore, newTotal) fired when a round's clock runs out, before the tally interlude
         public event Action<int, int> RoundEnded;
-
-        /// (roundNumber) fired as each new round's clock starts
         public event Action<int> RoundStarted;
 
-        // Set by the spawner so hazards/power ups can affect spawning through the manager
         public CrystalSpawner Spawner;
 
-        // One timer table instead of five coroutine handles. Coroutines could hold the CURRENT value
-        // of an effect but never how long was left on it, which is exactly what the HUD has to show
         private const int EffectSlots = 6;
         private readonly float[] _effectRemaining = new float[EffectSlots];
         private readonly float[] _effectDuration = new float[EffectSlots];
         private readonly float[] _effectMagnitude = new float[EffectSlots];
 
-        /// Seconds left on an effect, 0 when it is not running
         public float EffectRemaining(EffectKind kind) { return _effectRemaining[(int)kind]; }
-
-        /// Full length the effect was last granted for. The HUD divides by this for its bar
         public float EffectDuration(EffectKind kind) { return _effectDuration[(int)kind]; }
-
-        /// The effect's strength where it has one (x2 score, x1.6 reach), 0 where it does not
         public float EffectMagnitude(EffectKind kind) { return _effectMagnitude[(int)kind]; }
-
         public bool IsEffectActive(EffectKind kind) { return _effectRemaining[(int)kind] > 0f; }
+
+        private bool _begun;
 
         private void Start()
         {
             TimeRemaining = startSeconds;
             Multiplier = baseMultiplier;
+
+            if (requirePickupToStart && FindObjectOfType<PickaxePickup>() == null)
+            {
+                Debug.LogWarning("[CrystalCatchGame] requirePickupToStart is on but there is no active " +
+                                 "PickaxePickup in the scene. Starting immediately instead.");
+                requirePickupToStart = false;
+            }
+
+            if (requirePickupToStart) SetState(State.WaitingForPickup);
+            else BeginFromPickup();
+        }
+
+        public void BeginFromPickup()
+        {
+            if (_begun) return;
+            _begun = true;
             StartCoroutine(IntroCountdown());
         }
 
         private IEnumerator IntroCountdown()
         {
             SetState(State.Intro);
-
-            // One demo crystal to catch during the count (scores nothing, state isn't Playing yet)
-            if (Spawner != null) Spawner.EmitBurst(1);
 
             for (int n = countdownFrom; n >= 1; n--)
             {
@@ -140,8 +121,6 @@ namespace IntuitiveDesigns.CrystalCatch
             StartRound();
         }
 
-        /// Begins a round. Round 1 follows the countdown, every later round follows the tally
-        /// interlude, with the cart still rolling and the track never interrupted
         private void StartRound()
         {
             RoundNumber++;
@@ -151,8 +130,6 @@ namespace IntuitiveDesigns.CrystalCatch
 
             ReapplyActiveEffects();
 
-            // Speed up for the new round. SetSpeedScale is safe to step, CartController's
-            // acceleration clamp ramps it, so this never reads as a jolt
             if (cart != null)
             {
                 float scale = Mathf.Min(1f + (RoundNumber - 1) * speedIncreasePerRound, maxSpeedScale);
@@ -165,12 +142,9 @@ namespace IntuitiveDesigns.CrystalCatch
             MultiplierChanged?.Invoke(Multiplier);
             RoundStarted?.Invoke(RoundNumber);
 
-            if (Spawner != null) Spawner.StartSpawning();
+            if (Spawner != null) Spawner.StartSpawning(RoundNumber == 1);
         }
 
-        /// A round's clock ran out. Bank the score, hold for a tally, then roll straight into the
-        /// next round. Deliberately NO fade and NO ExperienceApp.End(), the cart keeps moving and
-        /// the track stays visible throughout
         private IEnumerator EndRound()
         {
             SetState(State.RoundEnd);
@@ -186,8 +160,6 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private void Update()
         {
-            // Ticked in EVERY state, not just Playing. A shield picked up in the last second of a
-            // round has to keep running through the tally interlude, the way the coroutines did
             TickEffects(Time.deltaTime);
 
             if (Current != State.Playing) return;
