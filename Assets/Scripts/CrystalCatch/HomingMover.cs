@@ -13,7 +13,6 @@ namespace IntuitiveDesigns.CrystalCatch
 
         /// Raised when the mover reaches/passes the player without being caught
         public event Action Passed;
-
         private Transform _target;
         private Vector3 _velocity;
         private float _launchTime;

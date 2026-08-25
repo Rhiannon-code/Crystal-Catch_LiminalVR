@@ -16,6 +16,9 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private TMP_Text multiplierText;
         [SerializeField] private TMP_Text centerText;       // Countdown/GO/final score
 
+        [Header("Onboarding")]
+        [SerializeField] private string pickupPrompt = "TAKE THE PICKAXE";
+
         [Header("Billboard (optional)")]
         [SerializeField] private bool facePlayer = true;
 
@@ -50,13 +53,11 @@ namespace IntuitiveDesigns.CrystalCatch
         private void Start()
         {
             ShowPlayPanel(false);
-            if (centerText != null) centerText.text = string.Empty;
+            OnStateChanged(game.Current);
         }
 
         private void Update()
         {
-            // Only the timer needs polling, and only when the whole second changes. Avoids allocating a
-            // string every frame (score/multiplier are event driven). Small but real GC win on Quest 2
             if (game.Current == CrystalCatchGame.State.Playing && timerText != null)
             {
                 int sec = Mathf.CeilToInt(game.TimeRemaining);
@@ -86,6 +87,12 @@ namespace IntuitiveDesigns.CrystalCatch
         private void OnStateChanged(CrystalCatchGame.State s)
         {
             ShowPlayPanel(s == CrystalCatchGame.State.Playing);
+
+            if (centerText == null) return;
+
+            if (s == CrystalCatchGame.State.WaitingForPickup) centerText.text = pickupPrompt;
+
+            else if (s == CrystalCatchGame.State.Intro) centerText.text = string.Empty;
         }
 
         /// Round over. Show what was scored and the running total, then get out of the way
@@ -142,9 +149,6 @@ namespace IntuitiveDesigns.CrystalCatch
         {
             if (_head == null)
             {
-                // Use the head LIMB transform (IVRAvatar.Head is the camera component, not a transform)
-                // Don't use ?. on VRAvatar, it's a UnityEngine.Object, so null propagation bypasses
-                // Unity's overloaded == and would sail past a destroyed avatar. Compare with == instead
                 var avatar = VRAvatar.Active;
                 if (avatar == null) return;
                 var limb = avatar.GetLimb(VRAvatarLimbType.Head);

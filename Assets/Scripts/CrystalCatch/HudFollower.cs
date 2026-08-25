@@ -26,9 +26,6 @@ namespace IntuitiveDesigns.CrystalCatch
         {
             if (_head == null)
             {
-                // Resolved lazily, the SDK spawns the rig at runtime, so nothing head related exists
-                // on the first frames. The head camera IS the head transform, and using it avoids
-                // depending on VRAvatar's head API shape
                 if (headOverride != null)
                 {
                     _head = headOverride;

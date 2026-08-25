@@ -13,8 +13,6 @@ namespace IntuitiveDesigns.CrystalCatch
             Twisty          // Frequent corners, modest elevation. The busiest we will ship
         }
 
-        /// What the track is doing over a stretch. Manoeuvres are taken ONE AT A TIME with a
-        /// straight, level rest between them, see the comment on PickNextManoeuvre
         public enum Manoeuvre { Straight, Turn, Grade }
 
         [Header("Generation (data)")]
@@ -24,27 +22,16 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float length = 5000f;
 
         [Header("Comfort limits: comfort rules, not feel knobs")]
-        // Yaw is expressed per SECOND at top speed and converted to per metre, so the promise holds
-        // whatever speed the round is running at
         [SerializeField] private float maxYawDegreesPerSecond = 15f;
         [SerializeField] private float topSpeed = 8f;
-
-        // Pitch gets its own, much tighter rate limit. Nose up/nose down is a stronger trigger than
-        // yaw because it fights the horizon, which is the strongest orientation cue the player has
         [SerializeField] private float maxGradient = 0.14f;
         [SerializeField] private float maxPitchDegreesPerSecond = 4f;
 
         [Header("Comfort spacing (metres)")]
-        // A sustained turn is worse than a brief one: vection builds the longer the mismatch runs
-        // Every manoeuvre is therefore bounded, and followed by a straight level rest
         [SerializeField] private float minStraightRun = 30f;
         [SerializeField] private float maxStraightRun = 90f;
         [SerializeField] private float minTurnRun = 30f;
         [SerializeField] private float maxTurnRun = 70f;
-
-        // Vertical oscillation is most nauseating around 0.2 Hz (ISO 2631's weighting peaks there)
-        // A grade run this long means a full down up cycle takes 2 x (grade + rest)/speed, which
-        // at 8 m/s is over 30 s, or ~0.03 Hz, an order of magnitude clear of the worst band
         [SerializeField] private float minGradeRun = 120f;
         [SerializeField] private float maxGradeRun = 200f;
         [SerializeField] private float verticalRange = 45f;
@@ -52,17 +39,12 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float maxHeadingDrift = 60f;
 
         [Header("Comfort ceiling")]
-        // Styles and hand-typed values are clamped to these before anything is generated, so no
-        // combination of inspector fiddling can quietly ship a track past the comfort budget
         [SerializeField] private bool allowBeyondComfortCeiling = false;
         [SerializeField] private float ceilingYawDegreesPerSecond = 20f;
         [SerializeField] private float ceilingGradient = 0.16f;
         [SerializeField] private float ceilingPitchDegreesPerSecond = 6f;
         [SerializeField, HideInInspector] private List<Vector3> _points = new List<Vector3>();
 
-        /// The speed the curves were laid out for. Above this the generated yaw exceeds the comfort
-        /// limit, so CartController clamps itself to it rather than trusting whoever tunes the round
-        /// scaling to remember
         public float TopSpeed { get { return topSpeed; } }
 
         public float PointSpacing { get { return pointSpacing; } }
@@ -118,8 +100,6 @@ namespace IntuitiveDesigns.CrystalCatch
             ClampToComfortCeiling();
         }
 
-        /// The last gate before generation. Rollercoaster used to live in the style list and was
-        /// simply beyond what this experience can ask of a player, so the ceiling replaced it
         private void ClampToComfortCeiling()
         {
             if (allowBeyondComfortCeiling) return;
@@ -162,8 +142,6 @@ namespace IntuitiveDesigns.CrystalCatch
             _genTargetYawRate = 0f;
             _genTargetGradient = 0f;
 
-            // Everyone starts on a straight. The first seconds of a VR ride are when the player is
-            // still finding their feet, and they are also the seconds a comfort test remembers
             _manoeuvre = Manoeuvre.Straight;
             _manoeuvreRemaining = Mathf.Max(straightLeadIn, minStraightRun);
             _generatorReady = true;
@@ -191,8 +169,6 @@ namespace IntuitiveDesigns.CrystalCatch
             AppendPoints(Mathf.Max(1, needed));
         }
 
-        /// Rebuilds heading, gradient and position from the tail of the existing points so an
-        /// extension continues smoothly from wherever the track currently ends
         private void RestoreGeneratorState()
         {
             ApplyStyle();
@@ -220,18 +196,10 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private void AppendPoints(int steps)
         {
-            // deg/sec at top speed -> deg/metre. This conversion is what keeps the comfort promise
-            // honest across the whole speed ramp
             float maxYawPerMetre = topSpeed > 0.01f ? maxYawDegreesPerSecond / topSpeed : 0f;
-
-            // Same conversion for pitch. Gradient is the tangent of the pitch angle, and at these
-            // small angles tan(x) ~ x, so a radians per metre cap IS a gradient per metre cap
             float maxGradientPerMetre = topSpeed > 0.01f
                 ? (maxPitchDegreesPerSecond * Mathf.Deg2Rad) / topSpeed
                 : 0f;
-
-            // Curvature itself still has to arrive gradually. A step change in yaw RATE is a kink,
-            // and it is felt as a jolt even when the rate either side of it is within limits
             float yawRateEase = maxYawPerMetre * 0.08f;
 
             for (int i = 0; i < steps; i++)
@@ -245,9 +213,6 @@ namespace IntuitiveDesigns.CrystalCatch
                 _genYaw = Mathf.Clamp(_genYaw + _genYawRate * pointSpacing,
                                       -maxHeadingDrift, maxHeadingDrift);
 
-                // Once the band is reached, stop pushing against it. Left running, the target would
-                // hold the heading pinned at the limit for the rest of the manoeuvre, which draws a
-                // long dead straight run out of what is supposed to be a corner
                 if (Mathf.Abs(_genYaw) >= maxHeadingDrift - 0.001f) _genTargetYawRate = 0f;
 
                 Vector3 flat = new Vector3(Mathf.Sin(_genYaw * Mathf.Deg2Rad), 0f,
@@ -272,9 +237,6 @@ namespace IntuitiveDesigns.CrystalCatch
             }
 
             float maxYawPerMetre = topSpeed > 0.01f ? maxYawDegreesPerSecond / topSpeed : 0f;
-
-            // Climbs are rarer than corners on purpose. Vertical motion is the more provocative of
-            // the two, and it is also the one the player has least visual explanation for
             bool grade = NextFloat() < 0.3f;
 
             if (grade)
@@ -308,9 +270,6 @@ namespace IntuitiveDesigns.CrystalCatch
             return direction;
         }
 
-        /// Keeps the track inside its vertical band by choosing the direction UP FRONT, rather than
-        /// flipping the gradient's sign mid climb, which would be a jolt exactly where the player
-        /// is least able to absorb one
         private float ChooseGradeDirection(float projectedClimb)
         {
             if (_genPos.y + projectedClimb > verticalRange) return -1f;
@@ -369,10 +328,6 @@ namespace IntuitiveDesigns.CrystalCatch
             return Quaternion.LookRotation(fwd.normalized, Vector3.up);
         }
 
-        // Comfort analysis, used by the gizmo and by the editor's report
-
-        /// Yaw rate in deg/sec AT TOP SPEED for the segment starting at `index`, which is the number
-        /// the comfort limit is written in
         public float YawRateAt(int index)
         {
             if (index < 1 || index >= _points.Count - 1) return 0f;

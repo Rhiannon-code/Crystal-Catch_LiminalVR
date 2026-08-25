@@ -8,24 +8,15 @@ namespace IntuitiveDesigns.CrystalCatch
         [Header("Refs")]
         [SerializeField] private CartController cart;
         [SerializeField] private Transform headOverride;
+        [SerializeField] private CrystalCatchGame game;
 
         [Header("Calibration (data)")]
-        // What the obstacle prefabs were authored against
         [SerializeField] private float referenceEyeHeight = 1.6f;
-
-        // Sampled across the 3-2-1 countdown, which is the one moment the player is reliably stood
-        // still and looking forward, and is already dead time
         [SerializeField] private float sampleSeconds = 2.5f;
-
-        // A bad sample must not be able to bury a beam in the floor or put it out of reach
         [SerializeField] private float maxOffset = 0.35f;
 
-        /// Highest the head reached while standing, measured from the cart floor
         public float StandingEyeHeight { get; private set; }
-
         public bool IsCalibrated { get; private set; }
-
-        /// Add this to anything authored against referenceEyeHeight
         public float HeightOffset
         {
             get
@@ -49,6 +40,14 @@ namespace IntuitiveDesigns.CrystalCatch
         private void Update()
         {
             if (IsCalibrated) return;
+
+            if (game != null && game.Current == CrystalCatchGame.State.WaitingForPickup)
+            {
+                StandingEyeHeight = 0f;
+                _elapsed = 0f;
+                return;
+            }
+
             if (!ResolveHead()) return;
 
             // Relative to the cart, not to world zero. The track climbs and descends, so an absolute

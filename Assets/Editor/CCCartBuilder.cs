@@ -1,4 +1,5 @@
 using System.IO;
+using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -13,6 +14,26 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         private const string TargetScene = "Assets/Scenes/MineCart.unity";
         private const string MaterialDir = "Assets/Materials";
         private const string PrefabDir = "Assets/Prefabs";
+        private const string PatternDir = "Assets/SpawnPatterns";
+
+        // Must match CaveAtmosphere.sightLimit. Everything the player could watch pop is drawn to
+        // this distance plus a margin, so it is always fully fogged by the time it changes state
+        private const float SightLimit = 65f;
+        private const float SightMargin = 8f;
+
+        /// Fraction of a piece's MEASURED size to step by when tiling, so neighbours overlap.
+        ///
+        /// Measuring fixes the pivot, but butting the pieces edge to edge was still wrong: these
+        /// panels have ragged silhouettes, and their bounding box is bigger than their solid part.
+        /// Touching boxes therefore leave a hole between the actual rock. The original hardcoded
+        /// numbers already knew this — Wall_Caves_A measures 4.86 m tall and was stepped at 4.44,
+        /// an overlap of 0.91 — which is where this value comes from
+        private const float KitOverlap = 0.91f;
+
+        private static float Step(float measured)
+        {
+            return Mathf.Max(0.25f, measured * KitOverlap);
+        }
         private const string RingPrefab = PrefabDir + "/TunnelRing.prefab";
         private const string PickaxeModel = "Assets/Mine/Models/Props/Pickaxe.fbx";
         private const float EffectHudWidth = 1000f;
@@ -57,6 +78,23 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         private const string FramePrefab = PrefabDir + "/TunnelFrame.prefab";
         private const string FrameMeshes = PrefabDir + "/TunnelFrameMeshes.asset";
         private const float FrameSpacing = 16f;
+        // --- Pinch shaft obstacles (ADR 0016) ---
+        // The cavern narrows into a timbered mine shaft for the length of an obstacle and opens out
+        // again after it. The narrowing is what makes the barrier sight blocking without needing to
+        // span all 20 m of cavern, and it telegraphs itself: the walls closing in IS the warning
+        private const float ShaftHalfWidth = 3f;
+        private const float ShaftHeight = 4.2f;
+        private const float ShaftLength = 9f;
+        private const float TaperLength = 7f;
+
+        // The blocker is a thin gate in the middle of the shaft, not the whole shaft. The shaft is
+        // the frame; the gate is the rule
+        private const float BlockerHalfDepth = 0.6f;
+
+        // How much clear corridor is left on the open side of a lean. Wide enough to pass, narrow
+        // enough that standing on the centreline does not
+        private const float LeanClearHalfWidth = 1.15f;
+
         private const float DuckBeamHeight = 1.25f;   // Underside of the low beam
         private const float LeanIntrusion = 1.0f;     // How far the hanging rock crosses the centre
         private const float LeanRockPivot = 3.9f;     // Puts its underside near head height
@@ -101,7 +139,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 // The game raises cart speed each round, so the link runs both ways
                 SetRef(game, "cart", cart);
             }
-            BuildCartBody(cartGo.transform);
+            var cartBody = BuildCartBody(cartGo.transform);
 
             var rig = FindRigRoot();
             if (rig != null)
@@ -116,6 +154,20 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                                  "or parent the rig under Cart.");
             }
 
+            // Lean the cart onto two wheels when the player leans. Body takes the full tip, the view
+            // takes 30% of it — see decisions/0017
+            var tilt = cartGo.AddComponent<CartTilt>();
+            SetRef(tilt, "cart", cart);
+            SetRef(tilt, "cartBody", cartBody);
+            if (rig != null) SetRef(tilt, "rig", rig);
+
+            // The fog, built EARLY because the tunnel and obstacle pools both take their draw
+            // distances from it and both are wired below
+            var atmosphereGo = new GameObject("CaveAtmosphere");
+            _atmosphere = atmosphereGo.AddComponent<CaveAtmosphere>();
+            SetFloat(_atmosphere, "sightLimit", SightLimit);
+            SetFloat(_atmosphere, "drawMargin", SightMargin);
+
             // Tunnel
             var tunnelGo = new GameObject("Tunnel");
             var tunnel = tunnelGo.AddComponent<TunnelBuilder>();
@@ -125,7 +177,22 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             SetRef(tunnel, "railPrefab", BuildRailPrefab());
             SetRef(tunnel, "framePrefab", BuildFramePrefab());
 
-            // Bat rides in the cart, following the right hand when one is tracked
+            // Pool spacing comes from what the pieces MEASURE, not from what they were assumed to
+            // be. Both prefabs are built above, so the measurements exist by now
+            SetFloat(tunnel, "ringSpacing", _measuredRingLength);
+            SetFloat(tunnel, "railSpacing", _measuredRailLength);
+
+            // The fog owns the sight limit and the pools read it at Start, so this is a reference
+            // rather than three baked copies. Behind matters as much as ahead: this is VR, and
+            // turning round to watch the tunnel delete itself was half the original complaint
+            SetRef(tunnel, "atmosphere", _atmosphere);
+
+            Debug.Log("[CCCartBuilder] Measured spacing: ring " + _measuredRingLength.ToString("0.00") +
+                      " m (was " + RingLength + "), rail " + _measuredRailLength.ToString("0.00") +
+                      " m (was " + RailSpacing + "). Mismatches here were the wall seams and the " +
+                      "doubled track.");
+
+            // Pickaxe waits in the cart. Taking it is what starts the ride, and either hand can
             var bat = BuildBat(game, cartGo.transform);
 
             // Spawner, repoint the existing one at the track instead of the old ring placement
@@ -175,6 +242,10 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             var calibration = obstacleGo.AddComponent<PlayerHeightCalibration>();
             SetRef(calibration, "cart", cart);
 
+            // So it does not start sampling until the player has the pickaxe. Reaching for it would
+            // otherwise be measured as standing height
+            if (game != null) SetRef(calibration, "game", game);
+
             var obstacles = obstacleGo.AddComponent<TrackObstacles>();
             SetRef(obstacles, "calibration", calibration);
             SetRef(obstacles, "cart", cart);
@@ -184,13 +255,44 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             SetRef(obstacles, "leanLeftPrefab", leanLeft);
             SetRef(obstacles, "leanRightPrefab", leanRight);
 
+            // Was 140 m ahead, from before there was any fog. Nothing beyond the sight limit can be
+            // seen, and an obstacle is now the heaviest object in the scene — drawing four of them
+            // through solid dark was pure cost. TrackObstacles adds the section's own length on top,
+            // so a long obstacle is still resident before its leading edge would come into view
+            SetRef(obstacles, "atmosphere", _atmosphere);
+
             // Desktop dodge testing. The emulator gives a camera you cannot crouch, so without this
             // the duck and lean obstacles cannot be tested at all outside a headset
             var dodge = obstacleGo.AddComponent<KeyboardTestDodge>();
             if (rig != null) SetRef(dodge, "rig", rig);
             SetDodgeTestExecutionOrder();
 
+            // Decides WHERE every item goes, ahead of the cart, and keeps them out of the obstacle
+            // sections. Built after the obstacles because it replays their sequence to find them
+            var directorGo = new GameObject("SpawnDirector");
+            var director = directorGo.AddComponent<SpawnDirector>();
+            SetRef(director, "obstacles", obstacles);
+            SetArray(director, "patterns", BuildSpawnPatterns());
+
+            if (spawner != null)
+            {
+                SetRef(spawner, "director", director);
+                Debug.Log("[CCCartBuilder] Spawner is now schedule driven. Item positions come from " +
+                          "SpawnDirector; the old per-tick rolls are the fallback if it is unassigned.");
+            }
+
             BuildEffectHud(game);
+            BuildPerfHud();
+
+            // Controller vibration on a hit. BatSwinger finds this through HapticPulse.Instance, so
+            // it just has to exist somewhere in the scene
+            if (Object.FindObjectOfType<HapticPulse>() == null)
+            {
+                new GameObject("Haptics").AddComponent<HapticPulse>();
+                Debug.Log("[CCCartBuilder] Haptics added. NOTE: verified to compile and expected to " +
+                          "work in a standalone APK, but the Liminal shell owns the OVR session in a " +
+                          "hosted .limapp — recheck there before relying on it.");
+            }
 
             // The old touch collectors are superseded by the bat.
             foreach (var hc in Object.FindObjectsOfType<HandCollector>())
@@ -416,6 +518,14 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             SetFloat(swinger, "modelGripAlongShaft", grip);
             SetFloat(swinger, "modelHeadAlongShaft", head);
 
+            // It starts in the holster, not in a hand. The pickup below is what hands it over, and
+            // handing it over is what starts the cart
+            SetBool(swinger, "startHeld", false);
+
+            var pickup = root.AddComponent<PickaxePickup>();
+            SetRef(pickup, "pickaxe", swinger);
+            if (game != null) SetRef(pickup, "game", game);
+
             // A trigger needs a kinematic Rigidbody on one side or OnTriggerEnter never fires,
             // the crystals deliberately have none, so it has to live here
             var rb = root.AddComponent<Rigidbody>();
@@ -485,17 +595,82 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             return visual;
         }
 
-        private static void BuildCartBody(Transform parent)
+        /// Returns the body transform, which is a CHILD of the cart rather than the cart itself.
+        ///
+        /// CartTilt rolls this to the full tip angle while the rig only takes a fraction of it, and
+        /// that split is only possible if the visual and the thing carrying the player are separate
+        /// transforms. Putting the boxes straight on the cart root, as before, would have meant any
+        /// roll went through the player's eyes at full strength
+        private static Transform BuildCartBody(Transform parent)
         {
             // A cockpit reference frame is the biggest comfort win available in vehicular VR, a
             // stable visual anchor in the lower field of view
             var mat = GetOrCreateUnlit("CartGrey", new Color(0.30f, 0.30f, 0.34f));
 
-            MakeBox(parent, "Cart_Floor", new Vector3(0f, -0.05f, 0f), new Vector3(1.4f, 0.1f, 2.0f), mat);
-            MakeBox(parent, "Cart_WallL", new Vector3(-0.7f, 0.4f, 0f), new Vector3(0.1f, 0.9f, 2.0f), mat);
-            MakeBox(parent, "Cart_WallR", new Vector3(0.7f, 0.4f, 0f), new Vector3(0.1f, 0.9f, 2.0f), mat);
-            MakeBox(parent, "Cart_Front", new Vector3(0f, 0.4f, 1.0f), new Vector3(1.4f, 0.9f, 0.1f), mat);
-            MakeBox(parent, "Cart_Back", new Vector3(0f, 0.4f, -1.0f), new Vector3(1.4f, 0.9f, 0.1f), mat);
+            var body = new GameObject("CartBody").transform;
+            body.SetParent(parent, false);
+
+            MakeBox(body, "Cart_Floor", new Vector3(0f, -0.05f, 0f), new Vector3(1.4f, 0.1f, 2.0f), mat);
+            MakeBox(body, "Cart_WallL", new Vector3(-0.7f, 0.4f, 0f), new Vector3(0.1f, 0.9f, 2.0f), mat);
+            MakeBox(body, "Cart_WallR", new Vector3(0.7f, 0.4f, 0f), new Vector3(0.1f, 0.9f, 2.0f), mat);
+            MakeBox(body, "Cart_Front", new Vector3(0f, 0.4f, 1.0f), new Vector3(1.4f, 0.9f, 0.1f), mat);
+            MakeBox(body, "Cart_Back", new Vector3(0f, 0.4f, -1.0f), new Vector3(1.4f, 0.9f, 0.1f), mat);
+
+            return body;
+        }
+
+        /// An in-scene FPS readout, parked low and left so it is out of the swing but inside frame.
+        ///
+        /// Drawn in the scene rather than relying on OVR Metrics Tool's compositor overlay, because
+        /// whether a compositor layer is captured in a headset recording is firmware dependent and
+        /// not worth discovering after a capture session
+        private static void BuildPerfHud()
+        {
+            var existing = Object.FindObjectOfType<PerfReadout>();
+            if (existing != null) Object.DestroyImmediate(existing.gameObject);
+
+            var go = new GameObject("PerfHUD", typeof(Canvas));
+
+            // World space, NOT Screen Space Overlay — an overlay canvas renders to the flat screen
+            // and never reaches either eye, so in a headset it is simply invisible
+            var canvas = go.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+
+            var rect = (RectTransform)go.transform;
+            rect.sizeDelta = new Vector2(600f, 260f);
+            rect.localScale = Vector3.one * EffectHudScale;
+
+            var lockedTo = go.AddComponent<HeadLockedHud>();
+            SetFloat(lockedTo, "distance", 1.6f);
+
+            // Down and to the left: readable with a glance, clear of the pickaxe and of the crystals
+            SetVector(lockedTo, "localOffset", new Vector3(-0.55f, -0.42f, 0f));
+
+            var textGo = new GameObject("PerfText", typeof(RectTransform));
+            textGo.transform.SetParent(go.transform, false);
+
+            var textRect = (RectTransform)textGo.transform;
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = Vector2.zero;
+            textRect.offsetMax = Vector2.zero;
+
+            var label = textGo.AddComponent<TextMeshProUGUI>();
+            label.fontSize = 72f;
+            label.alignment = TextAlignmentOptions.TopLeft;
+            label.text = "-- fps";
+            label.color = Color.white;
+
+            // Reads against both the dark cave and a bright crystal burst passing behind it
+            label.fontStyle = FontStyles.Bold;
+            label.outlineWidth = 0.2f;
+            label.outlineColor = new Color32(0, 0, 0, 255);
+
+            var readout = go.AddComponent<PerfReadout>();
+            SetRef(readout, "text", label);
+
+            Debug.Log("[CCCartBuilder] In-scene perf readout built (fps / ms / worst frame / over budget). " +
+                      "Drawn in the scene, so it WILL appear in headset recordings.");
         }
 
         private static void BuildEffectHud(CrystalCatchGame game)
@@ -521,8 +696,15 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
 
             // Number keys fire each effect on demand. Without it, checking the readout means waiting
             // for a rare pickup to spawn AND connecting with it, which is a slow way to test a HUD
-            if (game != null && game.GetComponent<KeyboardTestEffects>() == null)
-                game.gameObject.AddComponent<KeyboardTestEffects>();
+            if (game != null)
+            {
+                var keys = game.GetComponent<KeyboardTestEffects>();
+                if (keys == null) keys = game.gameObject.AddComponent<KeyboardTestEffects>();
+
+                // Was being added but never wired, so every one of keys 1-6 threw a null reference
+                // the moment it was pressed
+                SetRef(keys, "game", game);
+            }
 
             Debug.Log("[CCCartBuilder] Head locked effect HUD built: power ups top left, hazards top right.");
         }
@@ -547,42 +729,145 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             return prefab;
         }
 
-        /// Local space of a ring: +Z is the direction of travel, the origin sits on the track
-        /// centreline, and the slice spans z = -2 to +2
+        // Measured during the build and written into TunnelBuilder, so the pooling spacing is the
+        // piece's REAL length. These were hardcoded guesses, and every one that was slightly wrong
+        // showed up as a repeating seam or a doubled rail
+        private static float _measuredRingLength = RingLength;
+        private static float _measuredRailLength = RailSpacing;
+
+        // The scene's single source of truth for how far the player can see
+        private static CaveAtmosphere _atmosphere;
+
+        /// Builds one ring: the slice of tunnel that gets pooled along the track.
+        ///
+        /// Local space is +Z along the direction of travel with the origin on the track centreline,
+        /// and the slice spans one measured ring length centred on that origin
         private static void BuildRingPieces(Transform parent)
         {
-            for (int row = 0; row < SurfaceRows; row++)
-                for (int i = -SurfaceTiles; i <= SurfaceTiles; i++)
-                    PlaceKit(parent, "Ground/Ground_Mines_A", "Floor_" + row + "_" + i,
-                             new Vector3(i * 4f,
-                                         FloorY - FloorTileTop - row * SeamFillDepth,
-                                         row * SeamFillOffset),
-                             Quaternion.identity);
+            var wallRot = Quaternion.Euler(0f, 90f, 0f);
 
-            for (int row = 0; row < SurfaceRows; row++)
-                for (int i = -SurfaceTiles; i <= SurfaceTiles; i++)
-                    PlaceKit(parent, "Ground/Ground_Cave_A", "Ceiling_" + row + "_" + i,
-                             new Vector3(i * 4f,
-                                         CeilingHeight + row * SeamFillDepth,
-                                         row * SeamFillOffset),
-                             Quaternion.Euler(180f, 0f, 0f));
+            Vector3 wall = RotatedSize("Wall/Wall_Caves_A", wallRot);
+            Vector3 floor = KitBounds("Ground/Ground_Mines_A").size;
+            Vector3 roof = KitBounds("Ground/Ground_Cave_A").size;
 
-            for (int tier = 0; tier < WallTiers; tier++)
+            // The WALL panel decides the ring length. It is the surface the player actually reads,
+            // and a floor tile that has to be cut to fit is invisible in a way a wall seam is not.
+            // Stepped SHORT of the panel's true width so consecutive rings overlap down the track
+            float ringLength = Step(wall.z);
+            _measuredRingLength = ringLength;
+
+            float halfLength = ringLength * 0.5f;
+            float halfWidth = TunnelHalfWidth;
+
+            // Floor and ceiling tile in BOTH axes now. They only tiled across before, on the
+            // assumption that one tile's depth matched the ring, which it does not
+            TileSurface(parent, "Ground/Ground_Mines_A", "Floor", Quaternion.identity,
+                        floor, -halfWidth, halfWidth, -halfLength, halfLength,
+                        FloorY - FloorTileTop);
+
+            TileSurface(parent, "Ground/Ground_Cave_A", "Ceiling", Quaternion.Euler(180f, 0f, 0f),
+                        roof, -halfWidth, halfWidth, -halfLength, halfLength,
+                        CeilingHeight);
+
+            // Enough tiers to reach the roof, from the panel's measured height rather than a constant,
+            // stepped short of it so each tier overlaps the one below
+            float panelHeight = Step(wall.y);
+            int tiers = Mathf.Max(1, Mathf.CeilToInt((CeilingHeight - FloorY) / panelHeight));
+
+            for (int tier = 0; tier < tiers; tier++)
             {
-                float y = FloorY + tier * WallPanelHeight;
+                float y = FloorY + tier * panelHeight;
 
                 for (int row = 0; row < SurfaceRows; row++)
                 {
-                    float x = TunnelHalfWidth + row * SeamFillDepth;
-                    float z = row * SeamFillOffset;
+                    // The half-ring offset second row is ADR 0014's fix for the wedge gaps that open
+                    // on the outside of a turn, and it still earns its place. It is a SEPARATE
+                    // problem from the tiling seams being fixed here
+                    float x = halfWidth + row * SeamFillDepth;
+                    float z = -halfLength + row * halfLength;
 
-                    PlaceKit(parent, "Wall/Wall_Caves_A", "WallL_" + tier + "_" + row,
-                             new Vector3(-x, y, z), Quaternion.Euler(0f, -90f, 0f));
-                    PlaceKit(parent, "Wall/Wall_Caves_A", "WallR_" + tier + "_" + row,
-                             new Vector3(x, y, z), Quaternion.Euler(0f, 90f, 0f));
+                    PlaceAligned(parent, "Wall/Wall_Caves_A", "WallL_" + tier + "_" + row,
+                                 new Vector3(-x - wall.x, y, z),
+                                 Quaternion.Euler(0f, -90f, 0f), Vector3.one);
+
+                    PlaceAligned(parent, "Wall/Wall_Caves_A", "WallR_" + tier + "_" + row,
+                                 new Vector3(x, y, z), wallRot, Vector3.one);
                 }
             }
+        }
 
+        /// Tiles a floor or ceiling piece over a rectangle in the XZ plane, butting each tile against
+        /// the last from its measured footprint
+        private static void TileSurface(Transform parent, string kitPath, string name,
+                                        Quaternion rot, Vector3 size,
+                                        float minX, float maxX, float minZ, float maxZ, float y)
+        {
+            float stepX = Step(size.x);
+            float stepZ = Step(size.z);
+
+            int across = Mathf.CeilToInt((maxX - minX) / stepX);
+            int along = Mathf.CeilToInt((maxZ - minZ) / stepZ);
+
+            for (int i = 0; i < across; i++)
+            {
+                for (int j = 0; j < along; j++)
+                {
+                    // PlaceAligned, not PlaceKit. Offsetting by half a step only lands the tile
+                    // correctly if its pivot is at its centre, which is the same assumption that
+                    // produced the seams in the first place
+                    PlaceAligned(parent, kitPath, name + "_" + i + "_" + j,
+                                 new Vector3(minX + i * stepX, y, minZ + j * stepZ),
+                                 rot, Vector3.one);
+                }
+            }
+        }
+
+        // Measured once per piece per build. Instantiating a prefab to read its bounds is cheap, but
+        // the shaft asks for the same handful of pieces dozens of times
+        private static readonly System.Collections.Generic.Dictionary<string, Bounds> KitBoundsCache =
+            new System.Collections.Generic.Dictionary<string, Bounds>();
+
+        /// Local-space bounds of a kit piece at scale 1.
+        ///
+        /// The shaft tiles pieces edge to edge, and hardcoding sizes for that is how you get a wall
+        /// with a seam in it that nobody notices until it is on a headset. Measuring means the layout
+        /// stays correct if the pack is ever updated
+        private static Bounds KitBounds(string kitPath)
+        {
+            Bounds cached;
+            if (KitBoundsCache.TryGetValue(kitPath, out cached)) return cached;
+
+            var result = new Bounds(Vector3.zero, Vector3.one);
+
+            string path = KitPrefabs + kitPath + ".prefab";
+            var source = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (source == null)
+            {
+                Debug.LogWarning("[CCCartBuilder] Cannot measure missing kit piece: " + path);
+                KitBoundsCache[kitPath] = result;
+                return result;
+            }
+
+            var probe = Object.Instantiate(source);
+            probe.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            probe.transform.localScale = Vector3.one;
+
+            var renderers = probe.GetComponentsInChildren<Renderer>();
+            if (renderers.Length > 0)
+            {
+                // Renderer.bounds is world space, and the probe sits at the origin unrotated, so
+                // world and local are the same thing here
+                result = renderers[0].bounds;
+                for (int i = 1; i < renderers.Length; i++) result.Encapsulate(renderers[i].bounds);
+            }
+            else
+            {
+                Debug.LogWarning("[CCCartBuilder] " + path + " has no renderers to measure.");
+            }
+
+            Object.DestroyImmediate(probe);
+            KitBoundsCache[kitPath] = result;
+            return result;
         }
 
         private static void PlaceKit(Transform parent, string kitPath, string name,
@@ -643,10 +928,34 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             var loose = new GameObject("Loose");
             loose.transform.SetParent(root.transform, false);
 
+            var railRot = Quaternion.Euler(0f, 90f, 0f);
+
             // Same yaw as the walls, so the piece's own X length runs down the track and its gauge
             // sits across it
             PlaceKit(loose.transform, "Rails/Rail_B", "Rail",
-                     new Vector3(0f, FloorY, 0f), Quaternion.Euler(0f, 90f, 0f));
+                     new Vector3(0f, FloorY, 0f), railRot);
+
+            // CENTRED on its own mesh, and the pool spaced by its MEASURED length.
+            //
+            // This is the doubled, stepping track. The pool places a segment at a track point and
+            // steps by railSpacing, which was hardcoded to 2 m on the assumption Rail_B is 2 m long
+            // and pivoted at its middle. Any error in either shows up as segments overlapping or
+            // pulling apart, and on a curve the offset also throws them sideways
+            var rail = loose.transform.Find("Rail");
+            if (rail != null)
+            {
+                var renderers = rail.GetComponentsInChildren<Renderer>();
+                if (renderers.Length > 0)
+                {
+                    var b = renderers[0].bounds;
+                    for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
+
+                    _measuredRailLength = Mathf.Max(0.25f, b.size.z);
+
+                    // Only Z, the gauge and the ride height are already where they belong
+                    rail.localPosition -= new Vector3(0f, 0f, b.center.z);
+                }
+            }
 
             CombineInto(root.transform, loose.transform, RailMeshes);
             Object.DestroyImmediate(loose);
@@ -654,6 +963,107 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, RailPrefab);
             Object.DestroyImmediate(root);
             return prefab;
+        }
+
+        /// The starter set pieces. These are the punctuation in a run of baseline items, and each one
+        /// exists to ask a question the baseline generator cannot: cross the reach under time
+        /// pressure, choose between a reward and a risk, commit to one side and stay there.
+        ///
+        /// Regenerated on every build, so treat them as a STARTING POINT and expect to hand-tune the
+        /// assets afterwards — or rename them, since a renamed asset is not overwritten
+        private static Object[] BuildSpawnPatterns()
+        {
+            Directory.CreateDirectory(PatternDir);
+
+            var made = new System.Collections.Generic.List<Object>();
+
+            // Reach across the body, three times, early enough to teach the movement before it costs
+            made.Add(MakePattern("Sweep", "Sweep across", 0f, 0.5f, new[]
+            {
+                Slot(SpawnSlotKind.Crystal, 0f, -0.85f),
+                Slot(SpawnSlotKind.Crystal, 8f, 0f),
+                Slot(SpawnSlotKind.Crystal, 16f, 0.85f),
+            }));
+
+            // Stay on one side and keep swinging. The reward for reading it early is a clean run
+            made.Add(MakePattern("Run", "One-side run", 0f, 0.7f, new[]
+            {
+                Slot(SpawnSlotKind.Crystal, 0f, 0.6f),
+                Slot(SpawnSlotKind.Crystal, 7f, 0.7f),
+                Slot(SpawnSlotKind.Crystal, 14f, 0.6f),
+                Slot(SpawnSlotKind.PowerUp, 22f, 0.65f),
+            }));
+
+            // The actual decision: a gold sitting between two hazards. Taking it is a choice, and
+            // leaving it is a legitimate one
+            made.Add(MakePatternWithColour("Gauntlet", "Gold between hazards", 0.25f, 1f, new[]
+            {
+                Slot(SpawnSlotKind.Hazard, 0f, -0.7f),
+                Slot(SpawnSlotKind.Crystal, 9f, 0f, true, CrystalColour.Gold),
+                Slot(SpawnSlotKind.Hazard, 18f, 0.7f),
+            }));
+
+            // Reward on one side, risk on the other, at the SAME distance. There is no swing that
+            // takes both, which is the entire point
+            made.Add(MakePattern("Fork", "Reward or risk", 0.2f, 1f, new[]
+            {
+                Slot(SpawnSlotKind.PowerUp, 0f, -0.8f),
+                Slot(SpawnSlotKind.Hazard, 0f, 0.8f),
+            }));
+
+            // Tightening spacing. Late only: it is the one pattern that is genuinely fast
+            made.Add(MakePattern("Crescendo", "Tightening run", 0.55f, 1f, new[]
+            {
+                Slot(SpawnSlotKind.Crystal, 0f, -0.5f),
+                Slot(SpawnSlotKind.Crystal, 9f, 0.4f),
+                Slot(SpawnSlotKind.Crystal, 16f, -0.35f),
+                Slot(SpawnSlotKind.Crystal, 22f, 0.3f),
+                Slot(SpawnSlotKind.Crystal, 27f, 0f),
+            }));
+
+            AssetDatabase.SaveAssets();
+            return made.ToArray();
+        }
+
+        private static SpawnPattern.Slot Slot(SpawnSlotKind kind, float along, float lateral,
+                                              bool forceColour = false,
+                                              CrystalColour colour = CrystalColour.Blue)
+        {
+            return new SpawnPattern.Slot
+            {
+                kind = kind,
+                alongTrack = along,
+                lateral = lateral,
+                forceColour = forceColour,
+                colour = colour
+            };
+        }
+
+        private static SpawnPattern MakePattern(string file, string label, float minD, float maxD,
+                                                SpawnPattern.Slot[] slots)
+        {
+            return MakePatternWithColour(file, label, minD, maxD, slots);
+        }
+
+        private static SpawnPattern MakePatternWithColour(string file, string label,
+                                                          float minD, float maxD,
+                                                          SpawnPattern.Slot[] slots)
+        {
+            string path = PatternDir + "/" + file + ".asset";
+
+            var asset = AssetDatabase.LoadAssetAtPath<SpawnPattern>(path);
+            bool isNew = asset == null;
+            if (isNew) asset = ScriptableObject.CreateInstance<SpawnPattern>();
+
+            asset.label = label;
+            asset.minDifficulty = minD;
+            asset.maxDifficulty = maxD;
+            asset.slots = slots;
+
+            if (isNew) AssetDatabase.CreateAsset(asset, path);
+            else EditorUtility.SetDirty(asset);
+
+            return asset;
         }
 
         private static TrackObstacle BuildObstaclePrefabs(out TrackObstacle leanLeft,
@@ -673,45 +1083,22 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             var loose = new GameObject("Loose");
             loose.transform.SetParent(root.transform, false);
 
+            // Order matters only for readability, everything is combined into one mesh set anyway
+            BuildShaftWalls(loose.transform);
+            BuildShaftRoof(loose.transform);
+            BuildShaftTimbers(loose.transform);
+            BuildBulkhead(loose.transform, -1f);   // Approach face, sealed except for the shaft mouth
+            BuildBulkhead(loose.transform, 1f);    // Exit face
+            BuildTaper(loose.transform, -1f);      // Rubble banked against the approach face
+            BuildTaper(loose.transform, 1f);
+
             Vector3 dangerCentre;
             Vector3 dangerHalf;
 
             if (kind == TrackObstacle.Kind.DuckBeam)
-            {
-                PlaceKit(loose.transform, "Posts/Post_A", "PostL",
-                         new Vector3(-FrameHalfWidth, FloorY, 0f), Quaternion.identity);
-                PlaceKit(loose.transform, "Posts/Post_A", "PostR",
-                         new Vector3(FrameHalfWidth, FloorY, 0f), Quaternion.identity);
-
-                float topY = FloorY + PostHeight + BeamHalfThickness;
-                PlaceKit(loose.transform, "Posts/Beam_A", "Beam_Top_L",
-                         new Vector3(-1.7f, topY, 0f), Quaternion.identity);
-                PlaceKit(loose.transform, "Posts/Beam_A", "Beam_Top_R",
-                         new Vector3(1.7f, topY, 0f), Quaternion.identity);
-
-                // The thing you actually duck under
-                PlaceKit(loose.transform, "Posts/Beam_A", "Beam_Low",
-                         new Vector3(0f, DuckBeamHeight + BeamHalfThickness, 0f), Quaternion.identity);
-
-                // Anything from the beam upward is a head that did not get down in time
-                dangerCentre = new Vector3(0f, DuckBeamHeight + 0.6f, 0f);
-                dangerHalf = new Vector3(2f, 0.6f, 0.3f);
-            }
+                BuildDuckGate(loose.transform, out dangerCentre, out dangerHalf);
             else
-            {
-                // A rock hanging down on one side. It starts well above the cart's own walls, so it
-                // only ever threatens the player's HEAD, the cart never appears to clip through it
-                float side = kind == TrackObstacle.Kind.LeanLeft ? 1f : -1f;
-
-                PlaceKit(loose.transform, "Wall/Cave_Wall_Rocks_A", "Rock",
-                         new Vector3(side * LeanIntrusion, LeanRockPivot, 0f),
-                         Quaternion.Euler(0f, side * 90f, 0f));
-
-                // Cave_Wall_Rocks_A is 2.3 m across, so intruding 1.0 m leaves its inner edge just
-                // past the centreline: standing straight is a hit, leaning the other way is not
-                dangerCentre = new Vector3(side * 0.75f, 1.65f, 0f);
-                dangerHalf = new Vector3(0.9f, 0.55f, 0.4f);
-            }
+                BuildLeanGate(loose.transform, kind, out dangerCentre, out dangerHalf);
 
             CombineInto(root.transform, loose.transform, PrefabDir + "/" + name + "Meshes.asset");
             Object.DestroyImmediate(loose);
@@ -720,11 +1107,351 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             SetEnum(obstacle, "kind", (int)kind);
             SetVector(obstacle, "dangerCentre", dangerCentre);
             SetVector(obstacle, "dangerHalfExtents", dangerHalf);
+            SetFloat(obstacle, "sectionHalfLength", ShaftLength * 0.5f + TaperLength);
 
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, PrefabDir + "/" + name + ".prefab");
             Object.DestroyImmediate(root);
 
             return prefab != null ? prefab.GetComponent<TrackObstacle>() : null;
+        }
+
+        /// Both walls of the shaft, tiled from the panel's MEASURED size so the courses meet rather
+        /// than leaving a seam at whatever height a hardcoded guess happened to land on
+        private static void BuildShaftWalls(Transform parent)
+        {
+            const string panel = "Wall/Wall_Mines_A";
+
+            for (int s = 0; s < 2; s++)
+            {
+                float side = s == 0 ? -1f : 1f;
+
+                // Panels face inward, so each side is turned to look at the track
+                var rot = Quaternion.Euler(0f, side < 0f ? 90f : -90f, 0f);
+                Vector3 size = RotatedSize(panel, rot);
+
+                float stepZ = Step(size.z);
+                float stepY = Step(size.y);
+
+                int columns = Mathf.Max(1, Mathf.CeilToInt(ShaftLength / stepZ));
+                int rows = Mathf.Max(1, Mathf.CeilToInt(ShaftHeight / stepY));
+
+                // Aligned by min corner: the panel's own thickness sits OUTSIDE the shaft width
+                // either way, so the clear corridor is what ShaftHalfWidth says it is
+                float x = side < 0f ? -ShaftHalfWidth - size.x : ShaftHalfWidth;
+
+                for (int c = 0; c < columns; c++)
+                {
+                    for (int r = 0; r < rows; r++)
+                    {
+                        PlaceAligned(parent, panel,
+                                     "ShaftWall_" + (side < 0f ? "L" : "R") + c + "_" + r,
+                                     new Vector3(x,
+                                                 FloorY + r * stepY,
+                                                 -ShaftLength * 0.5f + c * stepZ),
+                                     rot, Vector3.one);
+                    }
+                }
+            }
+        }
+
+        /// A boarded roof over the shaft. This is what actually stops the player seeing over the top
+        /// of the gate and out into the open cavern beyond, which is the whole point of the pinch
+        private static void BuildShaftRoof(Transform parent)
+        {
+            const string plank = "WOodPlatforms/Panel_Wood_A";
+            Vector3 size = RotatedSize(plank, Quaternion.identity);
+
+            float plankWidth = Step(size.x);
+            float plankDepth = Step(size.z);
+
+            int across = Mathf.Max(1, Mathf.CeilToInt(ShaftHalfWidth * 2f / plankWidth));
+            int along = Mathf.Max(1, Mathf.CeilToInt(ShaftLength / plankDepth));
+
+            for (int a = 0; a < across; a++)
+            {
+                for (int b = 0; b < along; b++)
+                {
+                    PlaceAligned(parent, plank, "ShaftRoof_" + a + "_" + b,
+                                 new Vector3(-ShaftHalfWidth + a * plankWidth,
+                                             FloorY + ShaftHeight,
+                                             -ShaftLength * 0.5f + b * plankDepth),
+                                 Quaternion.identity, Vector3.one);
+                }
+            }
+        }
+
+        /// Reinforced post-and-beam sets down the shaft. Structural-looking timber is the vocabulary
+        /// the player has already been reading all ride from the tunnel frames, so the shaft says
+        /// "mine" without introducing a new shape to decode under time pressure
+        private static void BuildShaftTimbers(Transform parent)
+        {
+            const string post = "Posts/Post_Reinforced_A";
+            const string beam = "Posts/Beam_A";
+
+            Bounds postSize = KitBounds(post);
+            Bounds beamSize = KitBounds(beam);
+
+            float beamLength = Mathf.Max(0.5f, beamSize.size.x);
+            int beamsAcross = Mathf.Max(1, Mathf.CeilToInt(ShaftHalfWidth * 2f / beamLength));
+            float beamStartX = -ShaftHalfWidth + beamLength * 0.5f;
+
+            // Three sets: mouth, gate, and exit. Enough to read as structure, few enough that they
+            // do not become a picket fence strobing past at speed (the ADR 0014 frame-spacing trap)
+            for (int i = 0; i < 3; i++)
+            {
+                float z = -ShaftLength * 0.5f + ShaftLength * 0.5f * i;
+
+                PlaceKit(parent, post, "Timber_PostL_" + i,
+                         new Vector3(-ShaftHalfWidth + 0.15f, FloorY, z), Quaternion.identity);
+                PlaceKit(parent, post, "Timber_PostR_" + i,
+                         new Vector3(ShaftHalfWidth - 0.15f, FloorY, z), Quaternion.identity);
+
+                float beamY = FloorY + Mathf.Min(postSize.size.y, ShaftHeight) - beamSize.size.y * 0.5f;
+
+                for (int b = 0; b < beamsAcross; b++)
+                {
+                    PlaceKit(parent, beam, "Timber_Beam_" + i + "_" + b,
+                             new Vector3(beamStartX + b * beamLength, beamY, z), Quaternion.identity);
+                }
+            }
+        }
+
+        /// Seals the whole cavern cross-section at one end of the shaft, leaving only the shaft mouth.
+        ///
+        /// The taper alone did not do this. Rubble banked on the floor still leaves open cavern above
+        /// it and to the sides, so the player can see straight past the barrier and it stops reading
+        /// as one. A rock face spanning wall to wall and floor to roof, with a single hole in it, is
+        /// the thing that says there is no other way through — and it is the only version of that
+        /// claim the player can actually verify by looking
+        private static void BuildBulkhead(Transform parent, float direction)
+        {
+            const string face = "Wall/Wall_Mines_A";
+
+            string label = direction < 0f ? "In" : "Out";
+            float z = direction * ShaftLength * 0.5f;
+
+            // Faces the player: the approach bulkhead looks back down the track, the exit one ahead
+            var rot = Quaternion.Euler(0f, direction < 0f ? 180f : 0f, 0f);
+
+            float mouthTop = FloorY + ShaftHeight;
+
+            // Either side of the mouth, full height
+            FillRect(parent, face, "Bulkhead" + label + "_L",
+                     -TunnelHalfWidth, -ShaftHalfWidth, FloorY, CeilingHeight, z, rot);
+
+            FillRect(parent, face, "Bulkhead" + label + "_R",
+                     ShaftHalfWidth, TunnelHalfWidth, FloorY, CeilingHeight, z, rot);
+
+            // And the lintel above it, so the mouth is a hole rather than a slot open to the roof
+            FillRect(parent, face, "Bulkhead" + label + "_Top",
+                     -ShaftHalfWidth, ShaftHalfWidth, mouthTop, CeilingHeight, z, rot);
+        }
+
+        /// Rubble banked up on both sides, funnelling the cavern down to the shaft mouth.
+        ///
+        /// Without this the shaft is a box sitting in the middle of a large room and the player can
+        /// see straight past it. The taper is what makes the pinch read as the cave narrowing rather
+        /// than as scenery that was dropped in
+        private static void BuildTaper(Transform parent, float direction)
+        {
+            const string mound = "Ground/Ground_Mound_A";
+            const string rocks = "Wall/Cave_Rocks_A";
+
+            string label = direction < 0f ? "In" : "Out";
+            const int steps = 4;
+
+            for (int i = 0; i < steps; i++)
+            {
+                // t = 0 at the shaft mouth, 1 out at the cavern wall
+                float t = (i + 1f) / steps;
+                float z = direction * (ShaftLength * 0.5f + t * TaperLength);
+                float x = Mathf.Lerp(ShaftHalfWidth, TunnelHalfWidth - 1f, t);
+
+                // Mounds shrink as they approach the shaft, so the funnel reads as continuous
+                float scale = Mathf.Lerp(1.4f, 0.8f, t);
+
+                for (int s = 0; s < 2; s++)
+                {
+                    float side = s == 0 ? -1f : 1f;
+
+                    PlaceScaledKit(parent, mound, "Taper" + label + "_Mound_" + i + "_" + s,
+                                   new Vector3(side * x, FloorY, z),
+                                   Quaternion.Euler(0f, (i * 57f + s * 130f) % 360f, 0f),
+                                   Vector3.one * scale);
+
+                    // Rock chunks piled against the shaft mouth itself, hiding the seam where the
+                    // built shaft meets the pooled cavern wall
+                    if (i >= steps - 2) continue;
+
+                    PlaceScaledKit(parent, rocks, "Taper" + label + "_Rock_" + i + "_" + s,
+                                   new Vector3(side * (x - 0.8f), FloorY + 0.4f + i * 0.5f, z),
+                                   Quaternion.Euler(0f, (i * 93f + s * 41f) % 360f, 0f),
+                                   Vector3.one * Mathf.Lerp(1.1f, 0.7f, t));
+                }
+            }
+        }
+
+        /// Boards the shaft up from head height to the roof, leaving only a low gap. The player is
+        /// looking at a wall of collapsed timber with a hole at knee-to-chest height
+        private static void BuildDuckGate(Transform parent, out Vector3 dangerCentre,
+                                          out Vector3 dangerHalf)
+        {
+            const string plank = "WOodPlatforms/Panel_Wood_B";
+            const string beam = "Posts/Beam_A";
+
+            float gapTop = FloorY + DuckBeamHeight;
+            float boardedHeight = (FloorY + ShaftHeight) - gapTop;
+
+            // Boarding stands upright across the shaft, so it is turned to face down the track
+            var boardRot = Quaternion.Euler(0f, 90f, 0f);
+            FillRect(parent, plank, "DuckBoard",
+                     -ShaftHalfWidth, ShaftHalfWidth, gapTop, gapTop + boardedHeight, 0f, boardRot);
+
+            // The lip you actually judge the duck against. A boarded wall has no clear edge; a beam
+            // across the bottom of it does
+            Bounds beamSize = KitBounds(beam);
+            float beamLength = Mathf.Max(0.5f, beamSize.size.x);
+            int beamsAcross = Mathf.Max(1, Mathf.CeilToInt(ShaftHalfWidth * 2f / beamLength));
+            float beamStartX = -ShaftHalfWidth + beamLength * 0.5f;
+
+            for (int b = 0; b < beamsAcross; b++)
+            {
+                PlaceKit(parent, beam, "DuckLip_" + b,
+                         new Vector3(beamStartX + b * beamLength, gapTop, 0f), Quaternion.identity);
+            }
+
+            // Everything from the lip up is a head that did not get down in time. Full shaft width,
+            // because there is no longer anywhere to the side to escape to
+            float halfHeight = boardedHeight * 0.5f;
+            dangerCentre = new Vector3(0f, gapTop + halfHeight, 0f);
+            dangerHalf = new Vector3(ShaftHalfWidth, halfHeight, BlockerHalfDepth);
+        }
+
+        /// Fills one side of the shaft floor-to-roof with fallen rock, leaving a gap on the other.
+        /// A cave-in that came down across half the shaft is the most ordinary thing that can happen
+        /// in a mine, and it reads instantly without a single instruction
+        private static void BuildLeanGate(Transform parent, TrackObstacle.Kind kind,
+                                          out Vector3 dangerCentre, out Vector3 dangerHalf)
+        {
+            // LeanLeft means the player leans LEFT, so the rock fills the RIGHT of the shaft
+            float side = kind == TrackObstacle.Kind.LeanLeft ? 1f : -1f;
+
+            const string rocks = "Wall/Cave_Rocks_B";
+            const string wallRocks = "Wall/Cave_Wall_Rocks_A";
+
+            Bounds rockSize = KitBounds(rocks);
+            float rockWidth = Mathf.Max(0.5f, rockSize.size.x);
+            float rockHeight = Mathf.Max(0.5f, rockSize.size.y);
+
+            // The blocked span runs from the far wall in to the edge of the clear gap
+            float innerEdge = side * LeanClearHalfWidth;
+            float outerEdge = side * ShaftHalfWidth;
+            float blockedWidth = Mathf.Abs(outerEdge - innerEdge);
+
+            // Rubble is stepped at 70% of a piece so neighbours OVERLAP. Butting irregular rock
+            // shapes edge to edge leaves daylight between them wherever their silhouettes disagree,
+            // and a cave-in you can see through is not a cave-in
+            const float Overlap = 0.7f;
+            rockWidth *= Overlap;
+            rockHeight *= Overlap;
+
+            int across = Mathf.Max(1, Mathf.CeilToInt(blockedWidth / rockWidth));
+            int up = Mathf.Max(1, Mathf.CeilToInt(ShaftHeight / rockHeight));
+
+            for (int a = 0; a < across; a++)
+            {
+                float t = (a + 0.5f) / across;
+                float x = Mathf.Lerp(innerEdge, outerEdge, t);
+
+                for (int u = 0; u < up; u++)
+                {
+                    // Rotated per piece so a stack of the same mesh does not read as a brick wall
+                    PlaceScaledKit(parent, rocks, "LeanRock_" + a + "_" + u,
+                                   new Vector3(x, FloorY + u * rockHeight + rockHeight * 0.5f, 0f),
+                                   Quaternion.Euler(0f, (a * 71f + u * 113f) % 360f, 0f),
+                                   Vector3.one * Mathf.Lerp(1.15f, 0.9f, t));
+                }
+            }
+
+            // A slab hanging over the gap from the blocked side. This is what makes standing upright
+            // in the gap wrong: the hole is not just narrow, it is also low on the rock side
+            PlaceKit(parent, wallRocks, "LeanOverhang",
+                     new Vector3(innerEdge, FloorY + ShaftHeight - 1.2f, 0f),
+                     Quaternion.Euler(0f, side * 90f, 0f));
+
+            float halfWidth = blockedWidth * 0.5f;
+            dangerCentre = new Vector3(Mathf.Lerp(innerEdge, outerEdge, 0.5f),
+                                       FloorY + ShaftHeight * 0.5f, 0f);
+            dangerHalf = new Vector3(halfWidth, ShaftHeight * 0.5f, BlockerHalfDepth);
+        }
+
+        private static void PlaceScaledKit(Transform parent, string kitPath, string name,
+                                            Vector3 localPos, Quaternion localRot, Vector3 scale)
+        {
+            PlaceKit(parent, kitPath, name, localPos, localRot);
+
+            var placed = parent.Find(name);
+            if (placed != null) placed.localScale = scale;
+        }
+
+        /// Places a piece so its MESH's minimum corner lands exactly on targetMin.
+        ///
+        /// This is the fix for the gaps. Stepping by a piece's size only tiles correctly if its pivot
+        /// happens to sit on its own minimum corner, and in this kit it does not — pivots sit on the
+        /// module grid, so laying pieces at multiples of their height left a seam at every course.
+        /// Measuring where a piece actually landed and correcting is immune to that, and to rotation
+        private static void PlaceAligned(Transform parent, string kitPath, string name,
+                                         Vector3 targetMin, Quaternion rot, Vector3 scale)
+        {
+            PlaceKit(parent, kitPath, name, Vector3.zero, rot);
+
+            var placed = parent.Find(name);
+            if (placed == null) return;
+
+            placed.localScale = scale;
+
+            // The obstacle is assembled at the origin with an unrotated parent chain, so world and
+            // local are the same frame here. Anything that changes that breaks this correction
+            var renderers = placed.GetComponentsInChildren<Renderer>();
+            if (renderers.Length == 0) { placed.localPosition = targetMin; return; }
+
+            var b = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
+
+            placed.localPosition += targetMin - b.min;
+        }
+
+        /// Size of a kit piece after a rotation, for working out how many fit across a span. Only
+        /// correct for axis-aligned rotations, which is all this builder uses
+        private static Vector3 RotatedSize(string kitPath, Quaternion rot)
+        {
+            Vector3 s = rot * KitBounds(kitPath).size;
+            return new Vector3(Mathf.Abs(s.x), Mathf.Abs(s.y), Mathf.Abs(s.z));
+        }
+
+        /// Tiles a piece to cover an axis-aligned rectangle in the XY plane at a fixed z.
+        ///
+        /// Deliberately OVERFILLS: the loop count rounds up and the last row and column hang past the
+        /// requested edge. A barrier that is meant to prove there is no way through cannot afford to
+        /// be one tile short at the top, and the overhang is buried in rock either way
+        private static void FillRect(Transform parent, string kitPath, string name,
+                                     float minX, float maxX, float minY, float maxY,
+                                     float z, Quaternion rot)
+        {
+            if (maxX - minX <= 0.01f || maxY - minY <= 0.01f) return;
+
+            Vector3 size = RotatedSize(kitPath, rot);
+            float stepX = Step(size.x);
+            float stepY = Step(size.y);
+
+            int columns = Mathf.CeilToInt((maxX - minX) / stepX);
+            int rows = Mathf.CeilToInt((maxY - minY) / stepY);
+
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < rows; r++)
+                    PlaceAligned(parent, kitPath, name + "_" + c + "_" + r,
+                                 new Vector3(minX + c * stepX, minY + r * stepY, z),
+                                 rot, Vector3.one);
         }
 
         private static void CombineInto(Transform parent, Transform loose, string meshAssetPath)
@@ -766,9 +1493,32 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
 
             foreach (var pair in byMaterial)
             {
+                var combines = pair.Value.ToArray();
+
+                // A Mesh defaults to 16-bit indices, which caps it at 65535 vertices. Unity 2019.1
+                // does NOT fail loudly when a combine overruns that — it truncates, and you get a
+                // barrier with a piece quietly missing out of it. The pinch obstacles are the first
+                // thing in this project big enough to reach the cap
+                int vertices = 0;
+                for (int i = 0; i < combines.Length; i++)
+                    if (combines[i].mesh != null) vertices += combines[i].mesh.vertexCount;
+
                 var mesh = new Mesh();
                 mesh.name = "Ring_" + pair.Key.name;
-                mesh.CombineMeshes(pair.Value.ToArray(), true, true);
+
+                if (vertices > 65535)
+                {
+                    // 32-bit indices cost memory and bandwidth on a mobile GPU, so this is a fallback
+                    // that keeps the geometry correct rather than a default worth being casual about
+                    mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+
+                    Debug.LogWarning("[CCCartBuilder] " + meshAssetPath + " / " + pair.Key.name +
+                                     " combines to " + vertices + " vertices, over the 65535 16-bit " +
+                                     "limit. Using 32-bit indices. On Quest 2 this is worth avoiding: " +
+                                     "consider splitting the piece or using a lower-density kit mesh.");
+                }
+
+                mesh.CombineMeshes(combines, true, true);
                 mesh.RecalculateBounds();
 
                 if (!created)
