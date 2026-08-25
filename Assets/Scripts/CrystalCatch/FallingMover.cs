@@ -9,16 +9,9 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float spinDegreesPerSecond = 90f;
         [SerializeField] private float maxLife = 12f;
 
-        /// Raised when this object drops past the cart without being hit, a clean miss, no penalty
         public event Action Passed;
-
-        /// Local override on fall speed, multiplied with the session-wide Slow Time scale below
-        /// Left at 1 in normal use
         public float SpeedScale { get; set; }
-
-        /// Session wide Slow Time scale, read live so the hazard affects items already in the air
         private float GlobalScale { get { return _game != null ? _game.FallSpeedScale : 1f; } }
-
         private CrystalCatchGame _game;
         private float _fallSpeed;
         private float _despawnY;

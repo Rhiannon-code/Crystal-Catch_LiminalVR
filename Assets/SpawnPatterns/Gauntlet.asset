@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39080a70021a4395ab1a0dc9d6ba1700, type: 3}
+  m_Name: Gauntlet
+  m_EditorClassIdentifier: 
+  label: Gold between hazards
+  minDifficulty: 0.25
+  maxDifficulty: 1
+  slots:
+  - kind: 2
+    alongTrack: 0
+    lateral: -0.7
+    forceColour: 0
+    colour: 0
+  - kind: 0
+    alongTrack: 9
+    lateral: 0
+    forceColour: 1
+    colour: 3
+  - kind: 2
+    alongTrack: 18
+    lateral: 0.7
+    forceColour: 0
+    colour: 0

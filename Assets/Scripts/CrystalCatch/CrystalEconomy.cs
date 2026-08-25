@@ -29,8 +29,6 @@ namespace IntuitiveDesigns.CrystalCatch
             return CrystalColour.Blue;
         }
 
-        // Sensible defaults so a freshly created asset already plays the chosen arc
-        // Blue/green dominate early, purple climbsm gold is rare early and flurries at the end
         private void Reset()
         {
             points = new[] { 1, 3, 5, 10 };

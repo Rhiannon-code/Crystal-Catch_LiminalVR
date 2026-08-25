@@ -13,9 +13,10 @@ namespace IntuitiveDesigns.CrystalCatch
 
         [SerializeField] private Kind kind = Kind.DuckBeam;
 
+        [Header("Section extent (local metres)")]
+        [SerializeField] private float sectionHalfLength = 11.5f;
+
         [Header("Danger volume (local metres)")]
-        // On while tuning the dodge: the volume is the actual rule, and eyeballing whether a beam
-        // "looks duckable" against a mesh is not the same as seeing the box you have to stay out of
         [SerializeField] private bool alwaysDrawVolume = true;
         [SerializeField] private Vector3 dangerCentre = new Vector3(0f, 1.7f, 0f);
         [SerializeField] private Vector3 dangerHalfExtents = new Vector3(2f, 0.5f, 0.35f);
@@ -25,6 +26,9 @@ namespace IntuitiveDesigns.CrystalCatch
         // Read by the scene view preview, which has to draw the volume without an instance existing
         public Vector3 DangerCentre { get { return dangerCentre; } }
         public Vector3 DangerHalfExtents { get { return dangerHalfExtents; } }
+
+        /// Half the length of the no-spawn stretch this obstacle claims along the track
+        public float SectionHalfLength { get { return sectionHalfLength; } }
 
         /// Which way the player has to move to clear it. Used for the approach telegraph
         public Vector3 ClearDirection

@@ -12,14 +12,10 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private bool editorOnly = true;
 
         [Header("Reach (data, metres)")]
-        // Roughly what a standing player actually gives you. A real crouch is far deeper than this,
-        // but a duck that only just clears is the honest test of whether the beam is at a fair height
         [SerializeField] private float duckDrop = 0.55f;
         [SerializeField] private float leanReach = 0.5f;
 
         [Header("Feel")]
-        // Snapping the view would be both unpleasant and a poor test, a real duck takes time, and
-        // whether the beam is dodgeable AT SPEED depends on that time
         [SerializeField] private float moveSpeed = 6f;
 
         [Header("Keys")]
