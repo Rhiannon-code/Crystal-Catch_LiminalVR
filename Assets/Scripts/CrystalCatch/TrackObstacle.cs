@@ -27,7 +27,7 @@ namespace IntuitiveDesigns.CrystalCatch
         public Vector3 DangerCentre { get { return dangerCentre; } }
         public Vector3 DangerHalfExtents { get { return dangerHalfExtents; } }
 
-        /// Half the length of the no-spawn stretch this obstacle claims along the track
+        /// Half the length of the no spawn stretch this obstacle claims along the track
         public float SectionHalfLength { get { return sectionHalfLength; } }
 
         /// Which way the player has to move to clear it. Used for the approach telegraph

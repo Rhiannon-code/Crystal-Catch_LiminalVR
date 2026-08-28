@@ -52,7 +52,16 @@ namespace IntuitiveDesigns.CrystalCatch
             int token = left ? ++_leftToken : ++_rightToken;
 
             OVRInput.SetControllerVibration(frequency, Mathf.Clamp01(amplitude), controller);
+            LogPulse(controller, amplitude, seconds);
             StartCoroutine(StopAfter(controller, left, token, seconds));
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        private void LogPulse(OVRInput.Controller controller, float amplitude, float seconds)
+        {
+            Debug.Log("[Haptic] " + controller + " amp=" + amplitude.ToString("0.00") +
+                      " for " + seconds.ToString("0.000") + "s");
         }
 
         private IEnumerator StopAfter(OVRInput.Controller controller, bool left, int token, float seconds)

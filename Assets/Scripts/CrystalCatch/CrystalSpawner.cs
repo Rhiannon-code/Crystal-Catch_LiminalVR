@@ -25,6 +25,9 @@ namespace IntuitiveDesigns.CrystalCatch
         [Header("Concurrency")]
         [SerializeField] private int maxConcurrent = 6;
 
+        [Header("Spawn portals (data)")]
+        [SerializeField] private float portalLead = 0.5f;
+
         [Header("Pooled prefabs (one per colour)")]
         [SerializeField] private Crystal[] crystalPrefabs;   // Blue, Green, Purple, Gold
         [SerializeField] private int poolPerColour = 16;
@@ -141,7 +144,7 @@ namespace IntuitiveDesigns.CrystalCatch
             }
         }
 
-        /// The pre-director behaviour, roll a kind on a timer, drop it a fixed lead ahead
+        /// The pre director behaviour, roll a kind on a timer, drop it a fixed lead ahead
         private IEnumerator LegacyLoop()
         {
             while (_spawning)
@@ -201,8 +204,9 @@ namespace IntuitiveDesigns.CrystalCatch
 
             float fallSpeed, despawnY;
             PlaceAhead(cr.transform, out fallSpeed, out despawnY);
+            OpenCrystalPortal(colour, cr.transform.position);
             cr.gameObject.SetActive(true);
-            cr.Launch(fallSpeed, despawnY, game);
+            cr.Launch(fallSpeed, despawnY, game, PortalHold);
             _active++;
             Emitted?.Invoke();                     // Core pulses on each emit (CrystalCoreFX)
         }
@@ -221,9 +225,10 @@ namespace IntuitiveDesigns.CrystalCatch
 
             float fallSpeed, despawnY;
             PlaceAhead(s.transform, out fallSpeed, out despawnY);
+            OpenSpecialPortal(s.IsHazard, s.transform.position);
             s.Configure(game, this);
             s.gameObject.SetActive(true);
-            s.Launch(fallSpeed, despawnY, game);
+            s.Launch(fallSpeed, despawnY, game, PortalHold);
             _active++;
             Emitted?.Invoke();
         }
@@ -243,8 +248,9 @@ namespace IntuitiveDesigns.CrystalCatch
             float fallSpeed, despawnY;
             PlaceAt(cr.transform, item.Distance, item.Lateral, here, speed, out fallSpeed, out despawnY);
 
+            OpenCrystalPortal(colour, cr.transform.position);
             cr.gameObject.SetActive(true);
-            cr.Launch(fallSpeed, despawnY, game);
+            cr.Launch(fallSpeed, despawnY, game, PortalHold);
             _active++;
             Emitted?.Invoke();
         }
@@ -262,9 +268,10 @@ namespace IntuitiveDesigns.CrystalCatch
             float fallSpeed, despawnY;
             PlaceAt(s.transform, item.Distance, item.Lateral, here, speed, out fallSpeed, out despawnY);
 
+            OpenSpecialPortal(s.IsHazard, s.transform.position);
             s.Configure(game, this);
             s.gameObject.SetActive(true);
-            s.Launch(fallSpeed, despawnY, game);
+            s.Launch(fallSpeed, despawnY, game, PortalHold);
             _active++;
             Emitted?.Invoke();
         }
@@ -288,10 +295,29 @@ namespace IntuitiveDesigns.CrystalCatch
             float interceptAt = d - Mathf.Max(0f, interceptLead);
             float remaining = Mathf.Max(0f, interceptAt - here);
             float travelTime = speed > 0.05f ? remaining / speed : leadTime;
-            travelTime = Mathf.Max(travelTime, minFallTime);
+
+            // The portal is open for part of the window, so the FALL gets what is left. Floored at
+            // minFallTime, which also stops a short lead turning into an instant drop
+            travelTime = Mathf.Max(travelTime - PortalHold, minFallTime);
 
             fallSpeed = FallingMover.SpeedForIntercept(ceilingHeight, swingHeight, travelTime);
             despawnY = basePos.y - 1.5f;
+        }
+
+        private void OpenCrystalPortal(CrystalColour colour, Vector3 at)
+        {
+            if (SpawnPortalPool.Instance != null) SpawnPortalPool.Instance.PlayCrystal(colour, at);
+        }
+
+        private void OpenSpecialPortal(bool hazard, Vector3 at)
+        {
+            if (SpawnPortalPool.Instance != null) SpawnPortalPool.Instance.PlaySpecial(hazard, at);
+        }
+
+        /// 0 when there is no pool in the scene, so removing the pool cleanly restores the old timing
+        private float PortalHold
+        {
+            get { return SpawnPortalPool.Instance != null ? Mathf.Max(0f, portalLead) : 0f; }
         }
 
         private bool AtCap => _active >= maxConcurrent;
@@ -316,6 +342,9 @@ namespace IntuitiveDesigns.CrystalCatch
 
             // Time the cart will actually take to cover the lead, so a slow cart gets a slow drop
             float travelTime = speed > 0.05f ? lead / speed : leadTime;
+
+            // The legacy path has to honour the portal too, or items emitted through it fall late
+            travelTime = Mathf.Max(travelTime - PortalHold, minFallTime);
 
             fallSpeed = FallingMover.SpeedForIntercept(ceilingHeight, swingHeight, travelTime);
             despawnY = basePos.y - 1.5f;

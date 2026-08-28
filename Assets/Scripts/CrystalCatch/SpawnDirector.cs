@@ -181,9 +181,18 @@ namespace IntuitiveDesigns.CrystalCatch
                 });
             }
 
-            if (logSchedule)
-                Debug.Log("[SpawnDirector] Set piece '" + pattern.label + "' at " +
-                          anchor.ToString("0") + " m (" + pattern.slots.Length + " slots)");
+            LogSetPiece(pattern, anchor);
+        }
+
+        /// Compiled out of a non development build, call site and all
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        private void LogSetPiece(SpawnPattern pattern, float anchor)
+        {
+            if (!logSchedule) return;
+
+            Debug.Log("[SpawnDirector] Set piece '" + pattern.label + "' at " +
+                      anchor.ToString("0") + " m (" + pattern.slots.Length + " slots)");
         }
 
         private void Add(ScheduledItem item)

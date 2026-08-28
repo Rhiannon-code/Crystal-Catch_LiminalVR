@@ -17,9 +17,18 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private int copiesPerEffect = 4;
         [SerializeField] private float lifetime = 1.2f;
 
-        [Header("Audio (optional, greybox placeholder)")]
-        [SerializeField] private AudioClip catchClip;
+        [Header("Audio: per crystal colour")]
+        [SerializeField] private AudioClip[] crystalHitClips = new AudioClip[4];
+        [SerializeField] private AudioClip[] crystalShatterClips = new AudioClip[4];
+
+        [Header("Audio: fallbacks")]
+        [SerializeField] private AudioClip crystalHitClip;
+        [SerializeField] private AudioClip crystalShatterClip;
+        [SerializeField, Range(0f, 1f)] private float shatterVolume = 0.8f;
+
+        [Header("Audio: mix")]
         [SerializeField] private float volume = 0.7f;
+        [SerializeField, Range(0f, 0.3f)] private float pitchJitter = 0.06f;
 
         [Header("Shatter direction")]
         [SerializeField] private float shardVelocityScale = 0.6f;
@@ -104,7 +113,9 @@ namespace IntuitiveDesigns.CrystalCatch
         {
             int i = (int)colour;
             if (i < 0 || i >= _pools.Count) return;
-            Play(_pools[i], position, pitch, hitVelocity);
+            Play(_pools[i], position, pitch, hitVelocity,
+                 ClipFor(crystalHitClips, i, crystalHitClip),
+                 ClipFor(crystalShatterClips, i, crystalShatterClip));
         }
 
         /// Play the burst for a collected power up/hazard
@@ -115,10 +126,20 @@ namespace IntuitiveDesigns.CrystalCatch
 
         public void PlaySpecial(Vector3 position, Vector3 hitVelocity)
         {
-            Play(_specialPool, position, 1f, hitVelocity);
+            // Specials get their own clips in the next pass; for now they borrow the crystal hit
+            Play(_specialPool, position, 1f, hitVelocity, crystalHitClip, null);
         }
 
-        private void Play(Queue<FxInstance> pool, Vector3 position, float pitch, Vector3 hitVelocity)
+        /// Per colour clip, falling back to the shared one when that slot has not been filled in
+        private static AudioClip ClipFor(AudioClip[] clips, int index, AudioClip fallback)
+        {
+            if (clips != null && index >= 0 && index < clips.Length && clips[index] != null)
+                return clips[index];
+            return fallback;
+        }
+
+        private void Play(Queue<FxInstance> pool, Vector3 position, float pitch, Vector3 hitVelocity,
+                          AudioClip main, AudioClip layer)
         {
             if (pool == null || pool.Count == 0) return;   // Exhausted, skip rather than allocate
 
@@ -128,12 +149,18 @@ namespace IntuitiveDesigns.CrystalCatch
             fx.Go.SetActive(true);
             fx.Ps.Play(true);
 
-            if (catchClip != null)
+            float jitter = pitchJitter > 0f ? Random.Range(-pitchJitter, pitchJitter) : 0f;
+            fx.Audio.pitch = Mathf.Max(0.05f, pitch + jitter);
+            fx.Audio.volume = volume;
+
+            if (main != null)
             {
-                fx.Audio.clip = catchClip;
-                fx.Audio.pitch = pitch;
+                fx.Audio.clip = main;
                 fx.Audio.Play();
             }
+
+            // PlayOneShot layers over whatever clip is playing, so hit and shatter land together
+            if (layer != null) fx.Audio.PlayOneShot(layer, shatterVolume);
 
             StartCoroutine(ReturnAfter(pool, fx));
         }

@@ -1,9 +1,9 @@
 fileFormatVersion: 2
-guid: e1c879bcd60cd924389e97e229fd1ee8
+guid: cd340a300a53675d3bb634216c917257
 TextureImporter:
-  fileIDToRecycleName: {}
+  internalIDToNameTable: []
   externalObjects: {}
-  serializedVersion: 7
+  serializedVersion: 10
   mipmaps:
     mipMapMode: 0
     enableMipMap: 1
@@ -76,20 +76,15 @@ TextureImporter:
     physicsShape: []
     bones: []
     spriteID: 
+    internalID: 0
     vertices: []
     indices: 
     edges: []
     weights: []
+    secondaryTextures: []
   spritePackingTag: 
   pSDRemoveMatte: 0
   pSDShowRemoveMatteOption: 0
   userData: 
   assetBundleName: 
   assetBundleVariant: 
-AssetOrigin:
-  serializedVersion: 1
-  productId: 145043
-  packageName: "Free Low Poly \u2013 Lava Plants"
-  packageVersion: 1.0
-  assetPath: Assets/EmaceArt_LavaPlant/Texture/LavaPlant_texture.png
-  uploadId: 832048

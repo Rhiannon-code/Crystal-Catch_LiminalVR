@@ -54,7 +54,7 @@ namespace IntuitiveDesigns.CrystalCatch
             }
 
             // An obstacle is long, so it has to be resident well before the fog would reveal it, or
-            // its leading edge appears mid-air as the cart arrives
+            // its leading edge appears mid air as the cart arrives
             if (atmosphere != null)
             {
                 float sectionLength = duckPrefab != null ? duckPrefab.SectionHalfLength * 2f : 23f;
@@ -228,12 +228,23 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private void Report(int index, bool hit)
         {
+            // The bookkeeping runs whether or not the line is logged. Leaving it inside the log
+            // would mean stripping logs from a build quietly changed which obstacles get reported
+            if (hit && index >= _reportedTo) _reportedTo = index + 1;
+
+            LogResult(index, hit);
+        }
+
+        /// Compiled out of a non development build, call site and all. Building the string for a
+        /// log nothing reads still costs allocations on device
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        private void LogResult(int index, bool hit)
+        {
             if (!logResults) return;
 
             Debug.Log("[TrackObstacles] " + _kinds[index] + " at " +
                       _distances[index].ToString("0") + " m: " + (hit ? "HIT" : "cleared"));
-
-            if (hit && index >= _reportedTo) _reportedTo = index + 1;
         }
 
         private bool ResolveHead()
