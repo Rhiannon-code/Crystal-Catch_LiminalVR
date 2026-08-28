@@ -5,7 +5,10 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/CrystalCatch.unity
     guid: c52058f083209a88c9d60b1dc473cf8e
+  - enabled: 1
+    path: Assets/Scenes/MineCart.unity
+    guid: 40910483343482ff0982d1ae24161134
   m_configObjects: {}
