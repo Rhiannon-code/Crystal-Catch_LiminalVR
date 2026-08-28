@@ -14,6 +14,9 @@ namespace IntuitiveDesigns.CrystalCatch
         [Header("Sampling")]
         [SerializeField] private float windowSeconds = 0.5f;
 
+        [Header("Native capture")]
+        [SerializeField] private bool logEachSample;
+
         [Header("Display")]
         [SerializeField] private bool showWorstFrame = true;
         [SerializeField] private bool showOverBudgetCount = true;
@@ -60,6 +63,10 @@ namespace IntuitiveDesigns.CrystalCatch
                 text.text = _lastLine;
                 text.color = fps < warnBelowFps || _worstMs > BudgetMs * 1.5f ? badColour : goodColour;
             }
+
+            // Deliberately not [Conditional] like the gameplay logs. This one only exists to be read
+            // off the device, and it is opt in and off by default
+            if (logEachSample) Debug.Log("[Perf] " + _lastLine.Replace("\n", "  "));
 
             _elapsed = 0f;
             _frames = 0;

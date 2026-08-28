@@ -41,8 +41,14 @@ namespace IntuitiveDesigns.CrystalCatch
         public void SetValue(int points) => value = points;
         public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game)
         {
+            Launch(fallSpeed, despawnY, game, 0f);
+        }
+
+        /// holdSeconds keeps it hidden at the spawn point while its portal opens
+        public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game, float holdSeconds)
+        {
             _consumed = false;
-            _mover.Launch(fallSpeed, despawnY, game);
+            _mover.Launch(fallSpeed, despawnY, game, holdSeconds);
         }
 
         public void Collect(CrystalCatchGame game)
@@ -57,6 +63,10 @@ namespace IntuitiveDesigns.CrystalCatch
             _mover.Stop();
 
             game.AddScore(value);
+
+            // Shards first: the burst reads as the flash, the shards as the debris it throws
+            if (CrystalShatter.Instance != null)
+                CrystalShatter.Instance.Shatter(colour, transform.position, hitVelocity);
 
             if (CatchFXPool.Instance != null)
             {

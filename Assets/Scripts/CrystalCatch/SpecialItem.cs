@@ -75,8 +75,14 @@ namespace IntuitiveDesigns.CrystalCatch
 
         public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game)
         {
+            Launch(fallSpeed, despawnY, game, 0f);
+        }
+
+        /// holdSeconds keeps it hidden at the spawn point while its portal opens
+        public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game, float holdSeconds)
+        {
             _consumed = false;
-            _mover.Launch(fallSpeed, despawnY, game);
+            _mover.Launch(fallSpeed, despawnY, game, holdSeconds);
             if (approachCue != null) approachCue.Play();   // Telegraph incoming
         }
 
