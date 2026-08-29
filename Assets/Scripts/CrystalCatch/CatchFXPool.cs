@@ -126,7 +126,7 @@ namespace IntuitiveDesigns.CrystalCatch
 
         public void PlaySpecial(Vector3 position, Vector3 hitVelocity)
         {
-            // Specials get their own clips in the next pass; for now they borrow the crystal hit
+            // Specials get their own clips in the next pass, for now they borrow the crystal hit
             Play(_specialPool, position, 1f, hitVelocity, crystalHitClip, null);
         }
 

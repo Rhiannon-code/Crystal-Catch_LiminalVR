@@ -6,13 +6,6 @@ using UnityEngine;
 
 namespace IntuitiveDesigns.CrystalCatch.EditorTools
 {
-    /// Wires spawn portals, fall trails and the shatter. Idempotent - safe to re-run after the
-    /// crystal or special prefabs are swapped out, which is exactly what happened on 2026-08-25
-    /// when the hand built Crystal_* prefabs were replaced by the pack's "Crystal effect *" ones.
-    ///
-    /// The glob is deliberately "Crystal*" and not "Crystal_*". The first version of this tool
-    /// missed the new prefabs entirely because of that underscore, so they kept Unity's DEFAULT
-    /// TrailRenderer - 0.6 m wide, 5 seconds long, and emitting.
     public static class CCSpawnFX
     {
         private const string PortalDir = "Assets/Magic effects pack/Prefabs/Portals/";

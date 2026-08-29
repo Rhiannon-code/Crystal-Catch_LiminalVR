@@ -93,7 +93,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 var flags = new List<string>();
 
                 if (mat.HasProperty("_SoftParticlesEnabled") && mat.GetFloat("_SoftParticlesEnabled") > 0f)
-                    flags.Add("SOFT-PARTICLES (breaks: no depth texture)");
+                    flags.Add("SOFT PARTICLES (breaks: no depth texture)");
 
                 if (mat.HasProperty("_DistortionEnabled") && mat.GetFloat("_DistortionEnabled") > 0f)
                     flags.Add("DISTORTION (GrabPass, broken in single pass stereo)");
@@ -103,7 +103,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                     Color c = mat.GetColor("_Color");
                     if (Mathf.Max(c.r, Mathf.Max(c.g, c.b)) > 1.01f
                         && mat.HasProperty("_Mode") && Mathf.Approximately(mat.GetFloat("_Mode"), 2f))
-                        flags.Add("over-bright tint on alpha blend (no glow)");
+                        flags.Add("over bright tint on alpha blend (no glow)");
                 }
 
                 if (flags.Count > 0)

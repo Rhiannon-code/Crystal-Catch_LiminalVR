@@ -73,7 +73,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             Debug.Log("[CCCrystalBuilder] Done. " + built.Length + " crystals rebuilt from the effects pack.\n" +
                       "  Scale " + CrystalScale + ", hit radius " + HitRadius + " m, both likely need tuning " +
                       "once you see them at speed.\n" +
-                      "  PERF: each crystal is now 4 particle systems instead of 1 flat cube. At the " +
+                      "  PERF, each crystal is now 4 particle systems instead of 1 flat cube. At the " +
                       "concurrency cap that is ~24 systems of transparent overdraw on a mobile GPU, " +
                       "this is the most likely thing to cost you the 72 fps claim, so profile on device.");
         }

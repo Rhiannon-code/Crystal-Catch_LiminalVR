@@ -11,6 +11,10 @@ namespace IntuitiveDesigns.CrystalCatch
         public float Lateral;         // Fraction of reach, -1 to 1
         public bool ForceColour;
         public CrystalColour Colour;
+
+        /// Which special this slot is, decided HERE rather than at emit time. The director has to
+        /// commit to a concrete kind or it cannot pair a Shield with the Bomb it answers
+        public SpecialKind Special;
     }
 
     public class SpawnDirector : MonoBehaviour
@@ -33,13 +37,25 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private AnimationCurve hazardShare =
             new AnimationCurve(new Keyframe(0f, 0.15f), new Keyframe(1f, 0.5f));
 
+        [Header("Which special (relative weights, 0 = never)")]
+        [SerializeField] private float weightScoreGem = 5f;
+        [SerializeField] private float weightReachBoost = 2f;
+        [SerializeField] private float weightArcBoost = 2f;
+        [SerializeField] private float weightCrashCrystals = 1f;
+
+        [SerializeField] private float weightBomb = 5f;
+        [SerializeField] private float weightSlowHourglass = 2f;
+        [SerializeField] private float weightTimeDrain = 1f;
+
+        [Header("Shield pairing (data, metres)")]
+        [SerializeField] private float shieldLead = 32f;
+        [SerializeField] private bool pairShieldWithBomb = true;
+
         [Header("Reach")]
         [SerializeField] private float sameSideWithin = 12f;
 
         [Header("Set pieces")]
         [SerializeField] private SpawnPattern[] patterns = new SpawnPattern[0];
-
-        // Roughly how far apart authored set pieces are. They are the punctuation, not the sentence
         [SerializeField] private float patternEvery = 260f;
         [SerializeField] private float patternJitter = 80f;
 
@@ -48,7 +64,6 @@ namespace IntuitiveDesigns.CrystalCatch
 
         [Header("Determinism")]
         [SerializeField] private int seed = 90210;
-
         [SerializeField] private bool logSchedule = false;
 
         private readonly List<ScheduledItem> _items = new List<ScheduledItem>();
@@ -129,10 +144,11 @@ namespace IntuitiveDesigns.CrystalCatch
                 float gap = Mathf.Lerp(easyGap, hardGap, difficulty);
                 gap *= 1f + (NextFloat() * 2f - 1f) * gapJitter;
 
+                float consumed = 0f;
                 if (!Blocked(_scheduledTo))
-                    PlaceBaseline(_scheduledTo, difficulty);
+                    consumed = PlaceBaseline(_scheduledTo, difficulty);
 
-                _scheduledTo += Mathf.Max(1f, gap);
+                _scheduledTo += consumed + Mathf.Max(1f, gap);
             }
         }
 
@@ -143,22 +159,81 @@ namespace IntuitiveDesigns.CrystalCatch
             return Mathf.Clamp01(distance / fullDifficultyAt);
         }
 
-        private void PlaceBaseline(float distance, float difficulty)
+        /// Returns how much extra track this placement consumed, so a Bomb that had to be given a
+        /// lead in Shield does not have the next baseline item land on top of its own bomb
+        private float PlaceBaseline(float distance, float difficulty)
         {
-            var kind = SpawnSlotKind.Crystal;
+            if (NextFloat() >= specialChance.Evaluate(difficulty))
+            {
+                AddSlot(distance, SpawnSlotKind.Crystal, SpecialKind.TimeOrb);
+                return 0f;
+            }
 
-            if (NextFloat() < specialChance.Evaluate(difficulty))
-                kind = NextFloat() < hazardShare.Evaluate(difficulty)
-                     ? SpawnSlotKind.Hazard
-                     : SpawnSlotKind.PowerUp;
+            bool hazard = NextFloat() < hazardShare.Evaluate(difficulty);
 
+            if (!hazard)
+            {
+                AddSlot(distance, SpawnSlotKind.PowerUp, RollPowerUp());
+                return 0f;
+            }
+
+            var rolled = RollHazard();
+
+            if (rolled == SpecialKind.Bomb && pairShieldWithBomb && !Blocked(distance + shieldLead))
+            {
+                AddSlot(distance, SpawnSlotKind.PowerUp, SpecialKind.Shield);
+                AddSlot(distance + shieldLead, SpawnSlotKind.Hazard, SpecialKind.Bomb);
+                return shieldLead;
+            }
+
+            AddSlot(distance, SpawnSlotKind.Hazard, rolled);
+            return 0f;
+        }
+
+        private void AddSlot(float distance, SpawnSlotKind slot, SpecialKind special)
+        {
             Add(new ScheduledItem
             {
                 Distance = distance,
-                Kind = kind,
+                Kind = slot,
                 Lateral = ChooseLateral(distance),
-                ForceColour = false
+                ForceColour = false,
+                Special = special
             });
+        }
+
+        private SpecialKind RollPowerUp()
+        {
+            return WeightedPick(
+                new[] { SpecialKind.ScoreGem, SpecialKind.ReachBoost,
+                        SpecialKind.ArcBoost, SpecialKind.CrashCrystals },
+                new[] { weightScoreGem, weightReachBoost, weightArcBoost, weightCrashCrystals },
+                SpecialKind.ScoreGem);
+        }
+
+        private SpecialKind RollHazard()
+        {
+            return WeightedPick(
+                new[] { SpecialKind.Bomb, SpecialKind.SlowHourglass, SpecialKind.TimeDrainClock },
+                new[] { weightBomb, weightSlowHourglass, weightTimeDrain },
+                SpecialKind.Bomb);
+        }
+
+        /// Draws from the seeded sequence like everything else here, so the schedule stays a pure
+        /// function of the seed and the distance
+        private SpecialKind WeightedPick(SpecialKind[] kinds, float[] weights, SpecialKind fallback)
+        {
+            float total = 0f;
+            for (int i = 0; i < weights.Length; i++) total += Mathf.Max(0f, weights[i]);
+            if (total <= 0f) return fallback;
+
+            float roll = NextFloat() * total;
+            for (int i = 0; i < kinds.Length; i++)
+            {
+                roll -= Mathf.Max(0f, weights[i]);
+                if (roll <= 0f) return kinds[i];
+            }
+            return kinds[kinds.Length - 1];
         }
 
         private void PlacePattern(SpawnPattern pattern, float anchor)
@@ -177,7 +252,10 @@ namespace IntuitiveDesigns.CrystalCatch
                     Kind = slot.kind,
                     Lateral = Mathf.Clamp(slot.lateral, -1f, 1f),
                     ForceColour = slot.forceColour,
-                    Colour = slot.colour
+                    Colour = slot.colour,
+
+                    // Patterns author the CATEGORY, not the item, so the weights still choose
+                    Special = slot.kind == SpawnSlotKind.Hazard ? RollHazard() : RollPowerUp()
                 });
             }
 

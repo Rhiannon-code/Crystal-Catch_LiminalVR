@@ -6,15 +6,6 @@ using UnityEngine;
 
 namespace IntuitiveDesigns.CrystalCatch.EditorTools
 {
-    /// One check to run before Liminal > Build Window.
-    ///
-    /// The SDK already validates most of this in IssuesUtility, but CheckForAllIssues() evaluates
-    /// its gates with || — it short circuits on the first failure and only records a bool in
-    /// EditorPrefs, so it tells you THAT something is wrong and not WHICH. This runs each gate
-    /// separately and reports all of them.
-    ///
-    /// It also covers the two things the SDK cannot know about, because they are ours: the perf
-    /// readout is a measurement aid that must not ship, and its logging is pure overhead on device.
     public static class CCLimappPreflight
     {
         private const string RequiredUnityVersion = "2019.1.10f1";
@@ -33,7 +24,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                   pass, fail);
 
             // The SDK's rendering gate is exactly these two, and CCQuestBuild.Configure() happens to
-            // set both — so an APK test run leaves the project satisfying it rather than breaking it
+            // set both, so an APK test run leaves the project satisfying it rather than breaking it
             Check(PlayerSettings.virtualRealitySupported &&
                   PlayerSettings.stereoRenderingPath == StereoRenderingPath.SinglePass,
                   "VR supported + Single Pass stereo",
@@ -59,13 +50,13 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             var readout = Object.FindObjectOfType<PerfReadout>();
             Check(readout == null,
                   "No perf readout in the scene",
-                  "PerfReadout is still in the scene - run Crystal Catch > Quest > " +
+                  "PerfReadout is still in the scene, run Crystal Catch > Quest > " +
                   "Remove Perf Readout From HUD before building the .limapp",
                   pass, fail);
 
             Check(!EditorUserBuildSettings.development,
                   "Development Build is off",
-                  "Development Build is ON - gameplay logs are compiled back in and IL2CPP is slower",
+                  "Development Build is ON, gameplay logs are compiled back in and IL2CPP is slower",
                   pass, fail);
 
             var report = new StringBuilder();
@@ -75,8 +66,8 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             foreach (var line in pass) report.Append("\n   ok    ").Append(line);
 
             report.Append("\n\n   Not covered here, the SDK checks these itself in its Build Window:")
-                  .Append("\n   - incompatible packages (Post Processing, Curvy, DOTween)")
-                  .Append("\n   - forbidden calls (Application.Quit, SceneManager.Load/UnloadScene, DontDestroyOnLoad)");
+                  .Append("\n    incompatible packages (Post Processing, Curvy, DOTween)")
+                  .Append("\n    forbidden calls (Application.Quit, SceneManager.Load/UnloadScene, DontDestroyOnLoad)");
 
             if (fail.Count == 0) Debug.Log(report.ToString());
             else Debug.LogError(report.ToString());

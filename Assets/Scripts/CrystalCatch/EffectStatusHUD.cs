@@ -22,8 +22,14 @@ namespace IntuitiveDesigns.CrystalCatch
 
         [Header("Expiry warning")]
         [SerializeField] private float warnSeconds = 3f;
+        [SerializeField, Range(0.1f, 1f)] private float warnMaxFraction = 0.35f;
         [SerializeField] private float warnPulsesPerSecond = 2.5f;
         [SerializeField] private float warnMinAlpha = 0.55f;
+
+        [Header("Notices (one-shot pickups)")]
+        [SerializeField] private float noticeSeconds = 2.4f;
+        [SerializeField] private Color noticeTint = new Color(0.55f, 0.80f, 0.55f);
+        [SerializeField] private Color noticeHazardTint = new Color(0.85f, 0.45f, 0.25f);
 
         [Header("Colour")]
         [SerializeField] private Color backing = new Color(0.04f, 0.04f, 0.07f, 0.74f);
@@ -61,6 +67,13 @@ namespace IntuitiveDesigns.CrystalCatch
         private RectTransform _helpfulColumn;
         private RectTransform _harmfulColumn;
 
+        // Notices reuse the row visuals but are driven by a wall clock rather than by an effect's
+        // remaining time, so they need their own expiry
+        private Row _helpfulNotice;
+        private Row _harmfulNotice;
+        private float _helpfulNoticeUntil;
+        private float _harmfulNoticeUntil;
+
         private void Awake()
         {
             if (game == null)
@@ -78,9 +91,42 @@ namespace IntuitiveDesigns.CrystalCatch
             {
                 var kind = (CrystalCatchGame.EffectKind)i;
                 bool hazard = CrystalCatchGame.IsHazardEffect(kind);
-                _rows[i] = BuildRow(kind, hazard ? _harmfulColumn : _helpfulColumn, hazard);
+                _rows[i] = BuildRow(Names[i], Tints[i], hazard ? _harmfulColumn : _helpfulColumn, hazard);
                 _rows[i].Root.SetActive(false);
             }
+
+            _helpfulNotice = BuildRow("Notice", noticeTint, _helpfulColumn, false);
+            _harmfulNotice = BuildRow("NoticeHazard", noticeHazardTint, _harmfulColumn, true);
+            _helpfulNotice.Root.SetActive(false);
+            _harmfulNotice.Root.SetActive(false);
+        }
+
+        private void OnEnable()
+        {
+            if (game != null) game.Notice += OnNotice;
+        }
+
+        private void OnDisable()
+        {
+            if (game != null) game.Notice -= OnNotice;
+        }
+
+        /// A one shot pickup with no timed effect behind it. Shown in the same columns as the effect
+        /// rows so there is a single place to look, but with the label carrying the whole message
+        private void OnNotice(string message, bool hazard)
+        {
+            var row = hazard ? _harmfulNotice : _helpfulNotice;
+            if (row == null) return;
+
+            row.Label.text = message;
+            row.Seconds.text = string.Empty;
+            row.Fill.sizeDelta = new Vector2(rowWidth, 0f);   // Full bar, there is nothing to count down
+            row.Group.alpha = 1f;
+            row.Root.SetActive(true);
+            row.AppearedAt = Time.time;
+
+            if (hazard) _harmfulNoticeUntil = Time.time + noticeSeconds;
+            else _helpfulNoticeUntil = Time.time + noticeSeconds;
         }
 
         private void Update()
@@ -105,6 +151,33 @@ namespace IntuitiveDesigns.CrystalCatch
                 bool hazard = CrystalCatchGame.IsHazardEffect(kind);
                 ShowRow(_rows[i], kind, remaining, hazard ? harmfulSlot++ : helpfulSlot++);
             }
+
+            // Notices sit BELOW whatever effects are live, so an arriving one never shoves a
+            // running countdown down the column
+            PlaceNotice(_helpfulNotice, _helpfulNoticeUntil, helpfulSlot);
+            PlaceNotice(_harmfulNotice, _harmfulNoticeUntil, harmfulSlot);
+        }
+
+        private void PlaceNotice(Row row, float until, int slot)
+        {
+            if (row == null) return;
+
+            if (Time.time >= until)
+            {
+                if (row.Root.activeSelf) row.Root.SetActive(false);
+                return;
+            }
+
+            row.Rect.anchoredPosition = new Vector2(0f, -slot * (rowHeight + rowSpacing));
+
+            float age = Time.time - row.AppearedAt;
+            float punch = age < punchSeconds ? Mathf.Lerp(punchScale, 1f, age / punchSeconds) : 1f;
+            row.Rect.localScale = new Vector3(punch, punch, 1f);
+
+            // Fades over its last third rather than vanishing, so it reads as leaving rather than
+            // as a flicker
+            float tail = Mathf.Max(0.01f, noticeSeconds * 0.35f);
+            row.Group.alpha = Mathf.Clamp01((until - Time.time) / tail);
         }
 
         private void ShowRow(Row row, CrystalCatchGame.EffectKind kind, float remaining, int slot)
@@ -139,7 +212,8 @@ namespace IntuitiveDesigns.CrystalCatch
                 row.Label.text = LabelFor(kind, magnitude);
             }
 
-            row.Group.alpha = remaining <= warnSeconds ? PulseAlpha() : 1f;
+            float warnWindow = Mathf.Min(warnSeconds, duration * warnMaxFraction);
+            row.Group.alpha = remaining <= warnWindow ? PulseAlpha() : 1f;
         }
 
         private void Hide(Row row)
@@ -178,12 +252,12 @@ namespace IntuitiveDesigns.CrystalCatch
             return rect;
         }
 
-        private Row BuildRow(CrystalCatchGame.EffectKind kind, RectTransform column, bool hazard)
+        private Row BuildRow(string label, Color tint, RectTransform column, bool hazard)
         {
             var row = new Row();
             float edge = hazard ? 1f : 0f;   // Hazard rows hang off the right edge of their column
 
-            row.Root = NewUIObject("Effect_" + Names[(int)kind], column);
+            row.Root = NewUIObject("Effect_" + label, column);
             row.Rect = (RectTransform)row.Root.transform;
             row.Rect.anchorMin = new Vector2(edge, 1f);
             row.Rect.anchorMax = new Vector2(edge, 1f);
@@ -207,7 +281,6 @@ namespace IntuitiveDesigns.CrystalCatch
             row.Fill.anchoredPosition = Vector2.zero;
             row.Fill.sizeDelta = new Vector2(rowWidth, 0f);
 
-            var tint = Tints[(int)kind];
             tint.a = fillAlpha;
             AddImage(fillGo, tint);
 

@@ -16,6 +16,9 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private PlayerHeightCalibration calibration;
         [SerializeField] private CaveAtmosphere atmosphere;
 
+        [Header("Obstacle mix")]
+        [SerializeField] private bool duckOnly = true;
+
         [Header("Placement (data, metres)")]
         [SerializeField] private float firstObstacleAt = 140f;
         [SerializeField] private float minGap = 65f;
@@ -155,14 +158,22 @@ namespace IntuitiveDesigns.CrystalCatch
             while (at < toDistance && distances.Count < 4000)
             {
                 distances.Add(at);
-
                 double roll = rng.NextDouble();
-                kinds.Add(roll < 0.4 ? TrackObstacle.Kind.DuckBeam
-                        : roll < 0.7 ? TrackObstacle.Kind.LeanLeft
-                                     : TrackObstacle.Kind.LeanRight);
+                kinds.Add(KindForRoll(roll));
 
                 at += Mathf.Lerp(minGap, maxGap, (float)rng.NextDouble());
             }
+        }
+
+        /// The single place the seeded roll becomes a kind. Both the live walk and the preview go
+        /// through here, so they can never disagree about what is standing at a given distance
+        private TrackObstacle.Kind KindForRoll(double roll)
+        {
+            if (duckOnly) return TrackObstacle.Kind.DuckBeam;
+
+            return roll < 0.4 ? TrackObstacle.Kind.DuckBeam
+                 : roll < 0.7 ? TrackObstacle.Kind.LeanLeft
+                              : TrackObstacle.Kind.LeanRight;
         }
 
         private void EnsureGeneratedTo(float required)
@@ -171,12 +182,9 @@ namespace IntuitiveDesigns.CrystalCatch
             {
                 _distances.Add(_generatedTo);
 
-                // Duck and lean roughly evenly, because they are different physical asks and
-                // alternating them is what stops the player settling into one posture
+                // One shared decision point for both this walk and PreviewSequence's replay of it
                 double roll = _rng.NextDouble();
-                _kinds.Add(roll < 0.4 ? TrackObstacle.Kind.DuckBeam
-                         : roll < 0.7 ? TrackObstacle.Kind.LeanLeft
-                                      : TrackObstacle.Kind.LeanRight);
+                _kinds.Add(KindForRoll(roll));
 
                 _generatedTo += Mathf.Lerp(minGap, maxGap, (float)_rng.NextDouble());
             }

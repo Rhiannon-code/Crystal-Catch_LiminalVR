@@ -20,14 +20,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         // this distance plus a margin, so it is always fully fogged by the time it changes state
         private const float SightLimit = 65f;
         private const float SightMargin = 8f;
-
-        /// Fraction of a piece's MEASURED size to step by when tiling, so neighbours overlap.
-        ///
-        /// Measuring fixes the pivot, but butting the pieces edge to edge was still wrong: these
-        /// panels have ragged silhouettes, and their bounding box is bigger than their solid part.
-        /// Touching boxes therefore leave a hole between the actual rock. The original hardcoded
-        /// numbers already knew this — Wall_Caves_A measures 4.86 m tall and was stepped at 4.44,
-        /// an overlap of 0.91 — which is where this value comes from
         private const float KitOverlap = 0.91f;
 
         private static float Step(float measured)
@@ -78,17 +70,14 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         private const string FramePrefab = PrefabDir + "/TunnelFrame.prefab";
         private const string FrameMeshes = PrefabDir + "/TunnelFrameMeshes.asset";
         private const float FrameSpacing = 16f;
-        // --- Pinch shaft obstacles (ADR 0016) ---
-        // The cavern narrows into a timbered mine shaft for the length of an obstacle and opens out
-        // again after it. The narrowing is what makes the barrier sight blocking without needing to
-        // span all 20 m of cavern, and it telegraphs itself: the walls closing in IS the warning
+        // Pinch shaft obstacles
         private const float ShaftHalfWidth = 3f;
         private const float ShaftHeight = 4.2f;
         private const float ShaftLength = 9f;
         private const float TaperLength = 7f;
 
         // The blocker is a thin gate in the middle of the shaft, not the whole shaft. The shaft is
-        // the frame; the gate is the rule
+        // the frame, the gate is the rule
         private const float BlockerHalfDepth = 0.6f;
 
         // How much clear corridor is left on the open side of a lean. Wide enough to pass, narrow
@@ -155,7 +144,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             }
 
             // Lean the cart onto two wheels when the player leans. Body takes the full tip, the view
-            // takes 30% of it — see decisions/0017
+            // takes 30% of it
             var tilt = cartGo.AddComponent<CartTilt>();
             SetRef(tilt, "cart", cart);
             SetRef(tilt, "cartBody", cartBody);
@@ -254,11 +243,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             SetRef(obstacles, "duckPrefab", duck);
             SetRef(obstacles, "leanLeftPrefab", leanLeft);
             SetRef(obstacles, "leanRightPrefab", leanRight);
-
-            // Was 140 m ahead, from before there was any fog. Nothing beyond the sight limit can be
-            // seen, and an obstacle is now the heaviest object in the scene — drawing four of them
-            // through solid dark was pure cost. TrackObstacles adds the section's own length on top,
-            // so a long obstacle is still resident before its leading edge would come into view
             SetRef(obstacles, "atmosphere", _atmosphere);
 
             // Desktop dodge testing. The emulator gives a camera you cannot crouch, so without this
@@ -289,9 +273,9 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             if (Object.FindObjectOfType<HapticPulse>() == null)
             {
                 new GameObject("Haptics").AddComponent<HapticPulse>();
-                Debug.Log("[CCCartBuilder] Haptics added. NOTE: verified to compile and expected to " +
+                Debug.Log("[CCCartBuilder] Haptics added. NOTE, verified to compile and expected to " +
                           "work in a standalone APK, but the Liminal shell owns the OVR session in a " +
-                          "hosted .limapp — recheck there before relying on it.");
+                          "hosted .limapp, recheck there before relying on it.");
             }
 
             // The old touch collectors are superseded by the bat.
@@ -595,12 +579,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             return visual;
         }
 
-        /// Returns the body transform, which is a CHILD of the cart rather than the cart itself.
-        ///
-        /// CartTilt rolls this to the full tip angle while the rig only takes a fraction of it, and
-        /// that split is only possible if the visual and the thing carrying the player are separate
-        /// transforms. Putting the boxes straight on the cart root, as before, would have meant any
-        /// roll went through the player's eyes at full strength
         private static Transform BuildCartBody(Transform parent)
         {
             // A cockpit reference frame is the biggest comfort win available in vehicular VR, a
@@ -619,11 +597,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             return body;
         }
 
-        /// An in-scene FPS readout, parked low and left so it is out of the swing but inside frame.
-        ///
-        /// Drawn in the scene rather than relying on OVR Metrics Tool's compositor overlay, because
-        /// whether a compositor layer is captured in a headset recording is firmware dependent and
-        /// not worth discovering after a capture session
         private static void BuildPerfHud()
         {
             var existing = Object.FindObjectOfType<PerfReadout>();
@@ -631,7 +604,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
 
             var go = new GameObject("PerfHUD", typeof(Canvas));
 
-            // World space, NOT Screen Space Overlay — an overlay canvas renders to the flat screen
+            // World space, NOT Screen Space Overlay, an overlay canvas renders to the flat screen
             // and never reaches either eye, so in a headset it is simply invisible
             var canvas = go.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
@@ -643,7 +616,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             var lockedTo = go.AddComponent<HeadLockedHud>();
             SetFloat(lockedTo, "distance", 1.6f);
 
-            // Down and to the left: readable with a glance, clear of the pickaxe and of the crystals
+            // Down and to the left, readable with a glance, clear of the pickaxe and of the crystals
             SetVector(lockedTo, "localOffset", new Vector3(-0.55f, -0.42f, 0f));
 
             var textGo = new GameObject("PerfText", typeof(RectTransform));
@@ -669,7 +642,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             var readout = go.AddComponent<PerfReadout>();
             SetRef(readout, "text", label);
 
-            Debug.Log("[CCCartBuilder] In-scene perf readout built (fps / ms / worst frame / over budget). " +
+            Debug.Log("[CCCartBuilder] In-scene perf readout built (fps/ms/worst frame/over budget). " +
                       "Drawn in the scene, so it WILL appear in headset recordings.");
         }
 
@@ -706,7 +679,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 SetRef(keys, "game", game);
             }
 
-            Debug.Log("[CCCartBuilder] Head locked effect HUD built: power ups top left, hazards top right.");
+            Debug.Log("[CCCartBuilder] Head locked effect HUD built, power ups top left, hazards top right.");
         }
 
         private static GameObject BuildRingPrefab()
@@ -729,19 +702,11 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             return prefab;
         }
 
-        // Measured during the build and written into TunnelBuilder, so the pooling spacing is the
-        // piece's REAL length. These were hardcoded guesses, and every one that was slightly wrong
-        // showed up as a repeating seam or a doubled rail
         private static float _measuredRingLength = RingLength;
         private static float _measuredRailLength = RailSpacing;
 
         // The scene's single source of truth for how far the player can see
         private static CaveAtmosphere _atmosphere;
-
-        /// Builds one ring: the slice of tunnel that gets pooled along the track.
-        ///
-        /// Local space is +Z along the direction of travel with the origin on the track centreline,
-        /// and the slice spans one measured ring length centred on that origin
         private static void BuildRingPieces(Transform parent)
         {
             var wallRot = Quaternion.Euler(0f, 90f, 0f);
@@ -750,9 +715,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             Vector3 floor = KitBounds("Ground/Ground_Mines_A").size;
             Vector3 roof = KitBounds("Ground/Ground_Cave_A").size;
 
-            // The WALL panel decides the ring length. It is the surface the player actually reads,
-            // and a floor tile that has to be cut to fit is invisible in a way a wall seam is not.
-            // Stepped SHORT of the panel's true width so consecutive rings overlap down the track
             float ringLength = Step(wall.z);
             _measuredRingLength = ringLength;
 
@@ -780,9 +742,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
 
                 for (int row = 0; row < SurfaceRows; row++)
                 {
-                    // The half-ring offset second row is ADR 0014's fix for the wedge gaps that open
-                    // on the outside of a turn, and it still earns its place. It is a SEPARATE
-                    // problem from the tiling seams being fixed here
                     float x = halfWidth + row * SeamFillDepth;
                     float z = -halfLength + row * halfLength;
 
@@ -812,9 +771,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             {
                 for (int j = 0; j < along; j++)
                 {
-                    // PlaceAligned, not PlaceKit. Offsetting by half a step only lands the tile
-                    // correctly if its pivot is at its centre, which is the same assumption that
-                    // produced the seams in the first place
                     PlaceAligned(parent, kitPath, name + "_" + i + "_" + j,
                                  new Vector3(minX + i * stepX, y, minZ + j * stepZ),
                                  rot, Vector3.one);
@@ -827,11 +783,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         private static readonly System.Collections.Generic.Dictionary<string, Bounds> KitBoundsCache =
             new System.Collections.Generic.Dictionary<string, Bounds>();
 
-        /// Local-space bounds of a kit piece at scale 1.
-        ///
-        /// The shaft tiles pieces edge to edge, and hardcoding sizes for that is how you get a wall
-        /// with a seam in it that nobody notices until it is on a headset. Measuring means the layout
-        /// stays correct if the pack is ever updated
         private static Bounds KitBounds(string kitPath)
         {
             Bounds cached;
@@ -935,12 +886,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             PlaceKit(loose.transform, "Rails/Rail_B", "Rail",
                      new Vector3(0f, FloorY, 0f), railRot);
 
-            // CENTRED on its own mesh, and the pool spaced by its MEASURED length.
-            //
-            // This is the doubled, stepping track. The pool places a segment at a track point and
-            // steps by railSpacing, which was hardcoded to 2 m on the assumption Rail_B is 2 m long
-            // and pivoted at its middle. Any error in either shows up as segments overlapping or
-            // pulling apart, and on a curve the offset also throws them sideways
             var rail = loose.transform.Find("Rail");
             if (rail != null)
             {
@@ -965,12 +910,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             return prefab;
         }
 
-        /// The starter set pieces. These are the punctuation in a run of baseline items, and each one
-        /// exists to ask a question the baseline generator cannot: cross the reach under time
-        /// pressure, choose between a reward and a risk, commit to one side and stay there.
-        ///
-        /// Regenerated on every build, so treat them as a STARTING POINT and expect to hand-tune the
-        /// assets afterwards — or rename them, since a renamed asset is not overwritten
         private static Object[] BuildSpawnPatterns()
         {
             Directory.CreateDirectory(PatternDir);
@@ -1180,9 +1119,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             }
         }
 
-        /// Reinforced post-and-beam sets down the shaft. Structural-looking timber is the vocabulary
-        /// the player has already been reading all ride from the tunnel frames, so the shaft says
-        /// "mine" without introducing a new shape to decode under time pressure
         private static void BuildShaftTimbers(Transform parent)
         {
             const string post = "Posts/Post_Reinforced_A";
@@ -1216,13 +1152,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             }
         }
 
-        /// Seals the whole cavern cross-section at one end of the shaft, leaving only the shaft mouth.
-        ///
-        /// The taper alone did not do this. Rubble banked on the floor still leaves open cavern above
-        /// it and to the sides, so the player can see straight past the barrier and it stops reading
-        /// as one. A rock face spanning wall to wall and floor to roof, with a single hole in it, is
-        /// the thing that says there is no other way through — and it is the only version of that
-        /// claim the player can actually verify by looking
         private static void BuildBulkhead(Transform parent, float direction)
         {
             const string face = "Wall/Wall_Mines_A";
@@ -1230,7 +1159,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             string label = direction < 0f ? "In" : "Out";
             float z = direction * ShaftLength * 0.5f;
 
-            // Faces the player: the approach bulkhead looks back down the track, the exit one ahead
+            // Faces the player, the approach bulkhead looks back down the track, the exit one ahead
             var rot = Quaternion.Euler(0f, direction < 0f ? 180f : 0f, 0f);
 
             float mouthTop = FloorY + ShaftHeight;
@@ -1247,11 +1176,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                      -ShaftHalfWidth, ShaftHalfWidth, mouthTop, CeilingHeight, z, rot);
         }
 
-        /// Rubble banked up on both sides, funnelling the cavern down to the shaft mouth.
-        ///
-        /// Without this the shaft is a box sitting in the middle of a large room and the player can
-        /// see straight past it. The taper is what makes the pinch read as the cave narrowing rather
-        /// than as scenery that was dropped in
         private static void BuildTaper(Transform parent, float direction)
         {
             const string mound = "Ground/Ground_Mound_A";
@@ -1292,7 +1216,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         }
 
         /// Boards the shaft up from head height to the roof, leaving only a low gap. The player is
-        /// looking at a wall of collapsed timber with a hole at knee-to-chest height
+        /// looking at a wall of collapsed timber with a hole at knee to chest height
         private static void BuildDuckGate(Transform parent, out Vector3 dangerCentre,
                                           out Vector3 dangerHalf)
         {
@@ -1327,9 +1251,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             dangerHalf = new Vector3(ShaftHalfWidth, halfHeight, BlockerHalfDepth);
         }
 
-        /// Fills one side of the shaft floor-to-roof with fallen rock, leaving a gap on the other.
-        /// A cave-in that came down across half the shaft is the most ordinary thing that can happen
-        /// in a mine, and it reads instantly without a single instruction
         private static void BuildLeanGate(Transform parent, TrackObstacle.Kind kind,
                                           out Vector3 dangerCentre, out Vector3 dangerHalf)
         {
@@ -1348,9 +1269,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             float outerEdge = side * ShaftHalfWidth;
             float blockedWidth = Mathf.Abs(outerEdge - innerEdge);
 
-            // Rubble is stepped at 70% of a piece so neighbours OVERLAP. Butting irregular rock
-            // shapes edge to edge leaves daylight between them wherever their silhouettes disagree,
-            // and a cave-in you can see through is not a cave-in
             const float Overlap = 0.7f;
             rockWidth *= Overlap;
             rockHeight *= Overlap;
@@ -1394,12 +1312,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             if (placed != null) placed.localScale = scale;
         }
 
-        /// Places a piece so its MESH's minimum corner lands exactly on targetMin.
-        ///
-        /// This is the fix for the gaps. Stepping by a piece's size only tiles correctly if its pivot
-        /// happens to sit on its own minimum corner, and in this kit it does not — pivots sit on the
-        /// module grid, so laying pieces at multiples of their height left a seam at every course.
-        /// Measuring where a piece actually landed and correcting is immune to that, and to rotation
         private static void PlaceAligned(Transform parent, string kitPath, string name,
                                          Vector3 targetMin, Quaternion rot, Vector3 scale)
         {
@@ -1429,11 +1341,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             return new Vector3(Mathf.Abs(s.x), Mathf.Abs(s.y), Mathf.Abs(s.z));
         }
 
-        /// Tiles a piece to cover an axis-aligned rectangle in the XY plane at a fixed z.
-        ///
-        /// Deliberately OVERFILLS: the loop count rounds up and the last row and column hang past the
-        /// requested edge. A barrier that is meant to prove there is no way through cannot afford to
-        /// be one tile short at the top, and the overhang is buried in rock either way
         private static void FillRect(Transform parent, string kitPath, string name,
                                      float minX, float maxX, float minY, float maxY,
                                      float z, Quaternion rot)
@@ -1495,10 +1402,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             {
                 var combines = pair.Value.ToArray();
 
-                // A Mesh defaults to 16-bit indices, which caps it at 65535 vertices. Unity 2019.1
-                // does NOT fail loudly when a combine overruns that — it truncates, and you get a
-                // barrier with a piece quietly missing out of it. The pinch obstacles are the first
-                // thing in this project big enough to reach the cap
                 int vertices = 0;
                 for (int i = 0; i < combines.Length; i++)
                     if (combines[i].mesh != null) vertices += combines[i].mesh.vertexCount;
@@ -1508,7 +1411,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
 
                 if (vertices > 65535)
                 {
-                    // 32-bit indices cost memory and bandwidth on a mobile GPU, so this is a fallback
+                    // 32 bit indices cost memory and bandwidth on a mobile GPU, so this is a fallback
                     // that keeps the geometry correct rather than a default worth being casual about
                     mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
 

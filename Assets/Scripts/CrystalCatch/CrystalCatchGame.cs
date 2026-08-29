@@ -17,11 +17,12 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float endHoldSeconds = 3f;  // Hold the final score flourish before fading
         [SerializeField] private float endFadeSeconds = 2f;
 
-        [Header("Endless rounds")]
+        [Header("Rounds")]
         [SerializeField] private CartController cart;
         [SerializeField] private float roundTallySeconds = 4f;
         [SerializeField] private float speedIncreasePerRound = 0.15f;
         [SerializeField] private float maxSpeedScale = 2.0f;
+        [SerializeField] private int maxRounds = 5;
 
         [Header("Start")]
         [SerializeField] private bool requirePickupToStart = true;
@@ -34,6 +35,10 @@ namespace IntuitiveDesigns.CrystalCatch
         public int Score { get; private set; }
         public int TotalScore { get; private set; }
         public int RoundNumber { get; private set; }
+        public int MaxRounds { get { return maxRounds; } }
+
+        /// True while the round in progress is the last one. The HUD reads this to say so
+        public bool IsFinalRound { get { return maxRounds > 0 && RoundNumber >= maxRounds; } }
         public float Multiplier { get; private set; }
         public float StartSeconds => startSeconds;
         public float ElapsedNormalized =>
@@ -45,6 +50,7 @@ namespace IntuitiveDesigns.CrystalCatch
         public float ReachMultiplier { get; private set; } = 1f;
         public float ArcMultiplier { get; private set; } = 1f;
         public float FallSpeedScale { get; private set; } = 1f;
+        public float TimeDebt { get; private set; }
 
         public enum EffectKind
         {
@@ -68,6 +74,7 @@ namespace IntuitiveDesigns.CrystalCatch
         public event Action CountdownGo;          // GO
         public event Action<int> FinalScore;      // Only fired by an explicit EndExperience()
         public event Action<int, int> RoundEnded;
+        public event Action<string, bool> Notice;
         public event Action<int> RoundStarted;
 
         public CrystalSpawner Spawner;
@@ -128,6 +135,10 @@ namespace IntuitiveDesigns.CrystalCatch
             TimeRemaining = startSeconds;
             Multiplier = baseMultiplier;
 
+            // The clock is reset, so a debt carried from the previous round would be repaying time
+            // the player is no longer short of
+            TimeDebt = 0f;
+
             ReapplyActiveEffects();
 
             if (cart != null)
@@ -150,10 +161,21 @@ namespace IntuitiveDesigns.CrystalCatch
             SetState(State.RoundEnd);
             if (Spawner != null) Spawner.StopSpawning();
 
-            TotalScore += Score;
-            RoundEnded?.Invoke(Score, TotalScore);
+            int roundScore = Score;
+            TotalScore += roundScore;
+            Score = 0;
+
+            RoundEnded?.Invoke(roundScore, TotalScore);
 
             yield return new WaitForSeconds(roundTallySeconds);
+
+            // The cap is tested AFTER the tally so the last round still gets its score flourish
+            // before the session ends, rather than being cut off by the fade
+            if (maxRounds > 0 && RoundNumber >= maxRounds)
+            {
+                EndExperience();
+                yield break;
+            }
 
             StartRound();
         }
@@ -188,6 +210,15 @@ namespace IntuitiveDesigns.CrystalCatch
             if (Current != State.Playing) return;
             TimeRemaining += seconds;
             TimeChanged?.Invoke(TimeRemaining);
+
+        }
+
+        /// Announce a one shot event. Public because the CALLER is the only thing that knows what it
+        /// was, see SpecialItem, which names the pickup that caused it
+        public void RaiseNotice(string message, bool hazard)
+        {
+            var handler = Notice;
+            if (handler != null) handler(message, hazard);
         }
 
         public void SetShield(float seconds)
@@ -215,9 +246,25 @@ namespace IntuitiveDesigns.CrystalCatch
             BeginEffect(EffectKind.Arc, seconds, multiplier);
         }
 
-        // Called by hazards (all gated by the shield)
-        public void ApplyHazardTime(float seconds)   { if (!IsShielded) AddTime(seconds); }        // Pass negative
-        public void DisableCollection(float seconds) { if (!IsShielded) BeginEffect(EffectKind.SwingsMiss, seconds, 0f); }
+        // Called by hazards (all gated by the shield). A blocked hazard announces itself as a GOOD
+        // event, the shield did its job, and the player needs to see that it did
+        public void ApplyHazardTime(float seconds)   // Pass negative
+        {
+            if (IsShielded) return;
+            if (seconds < 0f) TimeDebt += -seconds;
+            AddTime(seconds);
+        }
+
+        public void CommitTimeRepayment(float seconds)
+        {
+            TimeDebt = Mathf.Max(0f, TimeDebt - Mathf.Abs(seconds));
+        }
+
+        public void DisableCollection(float seconds)
+        {
+            if (IsShielded) return;
+            BeginEffect(EffectKind.SwingsMiss, seconds, 0f);
+        }
         public void ImpairHands(float seconds)       { if (!IsShielded) StartCoroutine(TimedFlag(v => HandsImpaired = v, seconds)); } // Legacy
 
         /// Slow Time. scale below 1 slows the fall, leaving items out of reach overhead
@@ -315,7 +362,6 @@ namespace IntuitiveDesigns.CrystalCatch
             SetState(State.Ended);
             if (Spawner != null) Spawner.StopSpawning();
 
-            // Final flourish uses the cumulative total, not just the last round
             FinalScore?.Invoke(TotalScore + Score);
             yield return new WaitForSeconds(endHoldSeconds);
 
