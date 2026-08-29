@@ -10,3 +10,11 @@
 *.unitypackage filter=lfs diff=lfs merge=lfs -text
 *.exr filter=lfs diff=lfs merge=lfs -text
 *.fbx filter=lfs diff=lfs merge=lfs -text
+
+# Unity YAML assets: merge by OBJECT, not by line. A plain text merge of a scene can
+# report success and still produce duplicate fileIDs or broken references.
+# Driver is registered per-clone in .git/config (it holds an absolute path to the editor),
+# so every teammate has to run the `git config merge.unityyamlmerge.*` pair once.
+*.unity   merge=unityyamlmerge eol=lf
+*.prefab  merge=unityyamlmerge eol=lf
+*.asset   merge=unityyamlmerge eol=lf
