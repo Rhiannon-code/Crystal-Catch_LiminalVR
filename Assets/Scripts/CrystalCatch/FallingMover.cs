@@ -46,6 +46,12 @@ namespace IntuitiveDesigns.CrystalCatch
         /// so it reads as coming THROUGH the portal rather than appearing beside it
         public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game, float holdSeconds)
         {
+            Launch(fallSpeed, despawnY, game, holdSeconds, true);
+        }
+
+        public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game, float holdSeconds,
+                           bool hideWhileHeld)
+        {
             _fallSpeed = fallSpeed;
             _despawnY = despawnY;
             _game = game;
@@ -55,7 +61,7 @@ namespace IntuitiveDesigns.CrystalCatch
             if (SpeedScale <= 0f) SpeedScale = 1f;
 
             // Before the trail is cleared, or Clear() itself leaves one segment at the old position
-            SetHidden(_hold > 0f);
+            SetHidden(_hold > 0f && hideWhileHeld);
             ClearTrail();
         }
 

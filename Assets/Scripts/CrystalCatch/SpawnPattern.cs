@@ -23,8 +23,7 @@ namespace IntuitiveDesigns.CrystalCatch
             public bool forceColour;
             public CrystalColour colour;
         }
-
-        [Tooltip("Shown in logs and the scene view preview. Name the IDEA, not the contents.")]
+        
         public string label = "Set piece";
 
         [Header("When this may be used")]

@@ -5,18 +5,6 @@ using UnityEngine;
 
 namespace IntuitiveDesigns.CrystalCatch.EditorTools
 {
-    /// Adds (or removes) the on-headset FPS readout.
-    ///
-    /// PerfReadout has been in the project since the greybox but was never placed in MineCart, so a
-    /// native run had no way to report its own frame rate. Editor fps is not a substitute: the Scene
-    /// view's tunnel preview and TrackPath's 2500 line gizmo dominate it, and neither exists in a
-    /// build.
-    ///
-    /// It parents under the EffectHUD canvas because that one is head locked — a readout on the lazy
-    /// following HudFollower panel swims out of view exactly when a frame spike makes you turn to
-    /// look at something.
-    ///
-    /// This is a MEASUREMENT aid. Take it out before building the .limapp for Liminal.
     public static class CCPerfHud
     {
         private const string ObjectName = "PerfReadout";
@@ -74,7 +62,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             so.FindProperty("warnBelowFps").floatValue = QuestRefreshHz - 6f;
             so.FindProperty("showWorstFrame").boolValue = true;
             so.FindProperty("showOverBudgetCount").boolValue = true;
-            so.FindProperty("logEachSample").boolValue = true;   // for adb logcat -s Unity
+            so.FindProperty("logEachSample").boolValue = true;   // For adb logcat -s Unity
             so.ApplyModifiedProperties();
 
             EditorSceneManager.MarkSceneDirty(hud.gameObject.scene);

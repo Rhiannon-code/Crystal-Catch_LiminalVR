@@ -47,8 +47,14 @@ namespace IntuitiveDesigns.CrystalCatch
         /// holdSeconds keeps it hidden at the spawn point while its portal opens
         public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game, float holdSeconds)
         {
+            Launch(fallSpeed, despawnY, game, holdSeconds, true);
+        }
+
+        public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game, float holdSeconds,
+                           bool hideWhileHeld)
+        {
             _consumed = false;
-            _mover.Launch(fallSpeed, despawnY, game, holdSeconds);
+            _mover.Launch(fallSpeed, despawnY, game, holdSeconds, hideWhileHeld);
         }
 
         public void Collect(CrystalCatchGame game)

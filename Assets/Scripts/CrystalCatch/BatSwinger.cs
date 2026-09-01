@@ -26,9 +26,6 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float modelHeadAlongShaft = 0.214f;
 
         [Header("Grip (data, metres)")]
-        [Tooltip("Pushes the WHOLE pickaxe out along its own shaft, away from your hand. This is " +
-                 "the dial for 'it feels cramped against my body'. baseLength only extends the far " +
-                 "end - the grip stays pinned to your palm no matter how long you make it.")]
         [SerializeField] private float gripOffset = 0.12f;
 
         [Header("Swing gate (data)")]
@@ -52,10 +49,15 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private float swingPitchMin = 0.92f;
         [SerializeField] private float swingPitchMax = 1.15f;
 
-        [Header("Bomb feedback")]
+        [Header("Swept hit (data)")]
+        [SerializeField] private bool sweptHits = true;
+        [SerializeField] private LayerMask sweepLayers = ~0;
+
+        [Header("State feedback (materials, not particles)")]
         [SerializeField] private Renderer[] ghostRenderers;
         [SerializeField] private Material normalMaterial;
         [SerializeField] private Material ghostedMaterial;
+        [SerializeField] private Material shieldedMaterial;
 
         public float SwingSpeed { get { return _swingSpeed; } }
         public bool IsSwinging { get { return _swingSpeed >= minSwingSpeed; } }
@@ -67,18 +69,16 @@ namespace IntuitiveDesigns.CrystalCatch
         private Vector3 _headVelocity;
         private float _swingSpeed;
         private bool _hasLastPos;
-        private bool _wasGhosted;
-
-        // Last multipliers the shape was built for. NaN so the first ApplyShape always runs
+        private Material _appliedMaterial;
         private float _shapedReach = float.NaN;
         private float _shapedArc = float.NaN;
-
-        // Swing weight state. Angular velocity is in motionReference space, radians per second
         private Vector3 _swingAngularVelocity;
         private bool _swingPoseReady;
-
         private AudioSource _swingSource;
         private bool _swingArmed = true;
+        private readonly Collider[] _sweepHits = new Collider[24];
+        private Vector3 _lastHeadWorld;
+        private bool _hasLastHeadWorld;
 
         private void Awake()
         {
@@ -111,10 +111,6 @@ namespace IntuitiveDesigns.CrystalCatch
             _hand = null;
             ResetSwingPose();
         }
-
-        /// The holster to hand teleport is not a swing. Without this the spring is handed a 180
-        /// degree error in one frame and the pickaxe cartwheels, exactly as the speed sampler had
-        /// to be reset for the same reason
         private void ResetSwingPose()
         {
             _swingPoseReady = false;
@@ -149,8 +145,67 @@ namespace IntuitiveDesigns.CrystalCatch
 
             UpdateSwingSound();
 
+            SweepForHits(head);
+
             _lastHeadPos = sample;
             _hasLastPos = true;
+        }
+
+        private void SweepForHits(Vector3 head)
+        {
+            if (!sweptHits || hitVolume == null) return;
+            if (!CanScore()) { _hasLastHeadWorld = false; return; }
+
+            if (!_hasLastHeadWorld)
+            {
+                _lastHeadWorld = head;
+                _hasLastHeadWorld = true;
+                return;
+            }
+
+            Vector3 from = _lastHeadWorld;
+            _lastHeadWorld = head;
+
+            // A capsule of zero length is a sphere, which PhysX handles, but there is nothing to
+            // find that OnTriggerEnter has not already found
+            if ((head - from).sqrMagnitude < 1e-6f) return;
+
+            float radius = hitVolume.radius * MaxAbs(hitVolume.transform.lossyScale);
+
+            int count = Physics.OverlapCapsuleNonAlloc(from, head, radius, _sweepHits,
+                                                       sweepLayers, QueryTriggerInteraction.Collide);
+
+            for (int i = 0; i < count; i++)
+            {
+                var other = _sweepHits[i];
+                if (other == null) continue;
+
+                var crystal = other.GetComponent<Crystal>();
+                if (crystal != null)
+                {
+                    crystal.Hit(game, _headVelocity);
+                    PulseOnHit();
+                    continue;
+                }
+
+                var special = other.GetComponent<SpecialItem>();
+                if (special != null)
+                {
+                    special.Hit(game, _headVelocity);
+                    PulseOnHit();
+                }
+            }
+        }
+
+        private static float MaxAbs(Vector3 v)
+        {
+            return Mathf.Max(Mathf.Abs(v.x), Mathf.Max(Mathf.Abs(v.y), Mathf.Abs(v.z)));
+        }
+
+        /// The four gates OnTriggerEnter applies, in one place so the swept path cannot drift from it
+        private bool CanScore()
+        {
+            return game != null && IsHeld && game.CollectionEnabled && _swingSpeed >= minSwingSpeed;
         }
 
         private void UpdateSwingSound()
@@ -201,7 +256,7 @@ namespace IntuitiveDesigns.CrystalCatch
                 return;
             }
 
-            // Rotation first: the offset runs along the bat's OWN shaft, so with swing weight on
+            // Rotation first, the offset runs along the bat's OWN shaft, so with swing weight on
             // the grip point sweeps its arc with the lagged head instead of fighting it
             Quaternion rotation = WeightedRotation(_hand.rotation);
             transform.rotation = rotation;
@@ -332,26 +387,26 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private void ApplyGhosting()
         {
-            bool ghosted = game != null && !game.CollectionEnabled;
-            if (ghosted == _wasGhosted) return;
-            _wasGhosted = ghosted;
-
-            var mat = ghosted ? ghostedMaterial : normalMaterial;
-            if (mat == null || ghostRenderers == null) return;
+            var mat = StateMaterial();
+            if (mat == null || mat == _appliedMaterial || ghostRenderers == null) return;
+            _appliedMaterial = mat;
 
             for (int i = 0; i < ghostRenderers.Length; i++)
                 if (ghostRenderers[i] != null) ghostRenderers[i].sharedMaterial = mat;
         }
 
+        private Material StateMaterial()
+        {
+            if (game == null) return normalMaterial;
+
+            if (!game.CollectionEnabled && ghostedMaterial != null) return ghostedMaterial;
+            if (game.IsShielded && shieldedMaterial != null) return shieldedMaterial;
+            return normalMaterial;
+        }
+
         private void OnTriggerEnter(Collider other)
         {
-            if (game == null) return;
-
-            if (!IsHeld) return;
-
-            if (!game.CollectionEnabled) return;
-
-            if (_swingSpeed < minSwingSpeed) return;
+            if (!CanScore()) return;
 
             var crystal = other.GetComponent<Crystal>();
             if (crystal != null)
@@ -387,7 +442,8 @@ namespace IntuitiveDesigns.CrystalCatch
             }
 
             float strength = Mathf.InverseLerp(minSwingSpeed, minSwingSpeed * 3f, _swingSpeed);
-            HapticPulse.Instance.Hit(hand, strength);
+
+            HapticPulse.Instance.HitBoth(hand, strength);
         }
 
 #if UNITY_EDITOR

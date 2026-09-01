@@ -5,16 +5,6 @@ using UnityEngine;
 
 namespace IntuitiveDesigns.CrystalCatch.EditorTools
 {
-    /// Builds a standalone Quest 2 APK without touching File > Build Settings.
-    ///
-    /// Two reasons this exists rather than a written list of steps. The window itself will not open
-    /// on this machine (Unity's utility windows and a tiling WM disagree), and the settings a Quest 2
-    /// build needs are easy to get subtly wrong by hand — ARMv7 still builds happily and then simply
-    /// refuses to install on a 64-bit-only headset, which looks like a device problem rather than a
-    /// settings one.
-    ///
-    /// NOTE: this is a TEST build for your own headset. It is not the Liminal delivery path — that is
-    /// Liminal > Build Window, which produces a .limapp
     public static class CCQuestBuild
     {
         private const string Scene = "Assets/Scenes/MineCart.unity";
@@ -31,11 +21,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
 
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
             PlayerSettings.Android.forceSDCardPermission = false;
-
-            // GLES3 ONLY. Unity 2019.1 refuses to build XR if Vulkan is anywhere in this list, even
-            // listed second behind GLES3 — the check is presence, not order. The project shipped
-            // with GLES3 followed by Vulkan, which fails postprocess with
-            // "XR is currently not supported when using the Vulkan Graphics API"
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
             PlayerSettings.SetGraphicsAPIs(BuildTarget.Android,
                 new[] { UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 });
@@ -82,7 +67,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             if (EditorUserBuildSettings.activeBuildTarget != BuildTarget.Android)
             {
                 Debug.Log("[CCQuestBuild] Switching to Android. The first switch reimports every " +
-                          "asset and takes a while — let it finish, then run this again.");
+                          "asset and takes a while, let it finish, then run this again.");
 
                 EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
                 return;

@@ -32,6 +32,9 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private Crystal[] crystalPrefabs;   // Blue, Green, Purple, Gold
         [SerializeField] private int poolPerColour = 16;
 
+        [Header("Specials: when they enter the game")]
+        [SerializeField] private int specialsFromRound = 2;
+
         [Header("Special items (power ups + hazards)")]
         [SerializeField] private SpecialItem[] specialPrefabs;    // A mix, sorted into two pools by IsHazard
         [SerializeField] private int copiesPerSpecial = 3;
@@ -52,8 +55,8 @@ namespace IntuitiveDesigns.CrystalCatch
 
         // Colour selection + value now live in the CrystalEconomy asset (the 'richer late game' arc)
         private Queue<Crystal>[] _pools;
-        private Queue<SpecialItem> _powerUpQueue;
-        private Queue<SpecialItem> _hazardQueue;
+        private readonly Dictionary<SpecialKind, Queue<SpecialItem>> _specialPools =
+            new Dictionary<SpecialKind, Queue<SpecialItem>>();
         private float _elapsedNorm;
         private int _active;                                 // In flight crystals + items
         private bool _spawning;
@@ -77,17 +80,22 @@ namespace IntuitiveDesigns.CrystalCatch
                 }
             }
 
-            // Two pools so we can emit a chosen category (power up vs hazard) at spawn time
-            _powerUpQueue = new Queue<SpecialItem>();
-            _hazardQueue = new Queue<SpecialItem>();
             foreach (var prefab in specialPrefabs)
             {
                 if (prefab == null) continue;
+
+                Queue<SpecialItem> pool;
+                if (!_specialPools.TryGetValue(prefab.Kind, out pool))
+                {
+                    pool = new Queue<SpecialItem>();
+                    _specialPools[prefab.Kind] = pool;
+                }
+
                 for (int i = 0; i < copiesPerSpecial; i++)
                 {
                     var s = Instantiate(prefab, transform);
                     s.gameObject.SetActive(false);
-                    (s.IsHazard ? _hazardQueue : _powerUpQueue).Enqueue(s);
+                    pool.Enqueue(s);
                 }
             }
         }
@@ -138,7 +146,11 @@ namespace IntuitiveDesigns.CrystalCatch
 
                 ScheduledItem item;
                 while (!AtCap && director.TryTake(here + lead, out item))
+                {
+                    if (!CanStillLand(item.Distance, here, speed)) continue;
+
                     Emit(item, here, speed);
+                }
 
                 yield return null;
             }
@@ -159,6 +171,19 @@ namespace IntuitiveDesigns.CrystalCatch
                 float interval = spawnInterval.Evaluate(_elapsedNorm);
                 yield return new WaitForSeconds(interval);
             }
+        }
+
+        private bool CanStillLand(float distance, float here, float speed)
+        {
+            if (speed <= 0.05f) return true;         // Pre roll, PlaceAt falls back to leadTime
+
+            float interceptAt = Mathf.Min(distance, track != null ? track.Length : distance)
+                              - Mathf.Max(0f, interceptLead);
+
+            // The portal has to finish opening before the fall even starts
+            float needed = speed * (minFallTime + PortalHold);
+
+            return interceptAt - here >= needed;
         }
 
         private void Emit(ScheduledItem item, float here, float speed)
@@ -204,9 +229,9 @@ namespace IntuitiveDesigns.CrystalCatch
 
             float fallSpeed, despawnY;
             PlaceAhead(cr.transform, out fallSpeed, out despawnY);
-            OpenCrystalPortal(colour, cr.transform.position);
+            bool portal = OpenCrystalPortal(colour, cr.transform.position);
             cr.gameObject.SetActive(true);
-            cr.Launch(fallSpeed, despawnY, game, PortalHold);
+            cr.Launch(fallSpeed, despawnY, game, PortalHold, portal);
             _active++;
             Emitted?.Invoke();                     // Core pulses on each emit (CrystalCoreFX)
         }
@@ -217,18 +242,17 @@ namespace IntuitiveDesigns.CrystalCatch
 
             // Choose power up vs hazard by the late rising hazard share
             bool wantHazard = Random.value < hazardShare.Evaluate(_elapsedNorm);
-            var queue = wantHazard ? _hazardQueue : _powerUpQueue;
-            if (queue.Count == 0) queue = wantHazard ? _powerUpQueue : _hazardQueue; // Fall back to the other
-            if (queue.Count == 0) { EmitCrystal(); return; }
 
-            var s = queue.Dequeue();
+            // Legacy path: no director means no scheduled kind, so take anything of the category
+            var s = TakeSpecial(wantHazard ? SpecialKind.Bomb : SpecialKind.ScoreGem, wantHazard);
+            if (s == null) { EmitCrystal(); return; }
 
             float fallSpeed, despawnY;
             PlaceAhead(s.transform, out fallSpeed, out despawnY);
-            OpenSpecialPortal(s.IsHazard, s.transform.position);
+            bool portal = OpenSpecialPortal(s.IsHazard, s.transform.position);
             s.Configure(game, this);
             s.gameObject.SetActive(true);
-            s.Launch(fallSpeed, despawnY, game, PortalHold);
+            s.Launch(fallSpeed, despawnY, game, PortalHold, portal);
             _active++;
             Emitted?.Invoke();
         }
@@ -248,32 +272,90 @@ namespace IntuitiveDesigns.CrystalCatch
             float fallSpeed, despawnY;
             PlaceAt(cr.transform, item.Distance, item.Lateral, here, speed, out fallSpeed, out despawnY);
 
-            OpenCrystalPortal(colour, cr.transform.position);
+            bool portal = OpenCrystalPortal(colour, cr.transform.position);
             cr.gameObject.SetActive(true);
-            cr.Launch(fallSpeed, despawnY, game, PortalHold);
+            cr.Launch(fallSpeed, despawnY, game, PortalHold, portal);
             _active++;
             Emitted?.Invoke();
         }
 
         private void EmitSpecialAt(ScheduledItem item, float here, float speed)
         {
+            // Not yet in play: spend the slot on a crystal so the ride keeps its shape
+            if (game != null && game.RoundNumber < specialsFromRound)
+            {
+                EmitCrystalAt(item, here, speed);
+                return;
+            }
+
             bool wantHazard = item.Kind == SpawnSlotKind.Hazard;
+            SpecialKind wanted = item.Special;
 
-            var queue = wantHazard ? _hazardQueue : _powerUpQueue;
-            if (queue.Count == 0) queue = wantHazard ? _powerUpQueue : _hazardQueue;
-            if (queue.Count == 0) { EmitCrystalAt(item, here, speed); return; }
+            // Repayment outranks the schedule. A power up slot becomes a Time Orb whenever the
+            // player is owed time, which is the ONLY way a Time Orb ever reaches the track
+            bool repaying = false;
+            if (!wantHazard && game != null && game.TimeDebt > 0.01f && Available(SpecialKind.TimeOrb))
+            {
+                wanted = SpecialKind.TimeOrb;
+                repaying = true;
+            }
 
-            var s = queue.Dequeue();
+            var s = TakeSpecial(wanted, wantHazard);
+            if (s == null) { EmitCrystalAt(item, here, speed); return; }
+
+            if (repaying && s.Kind == SpecialKind.TimeOrb) game.CommitTimeRepayment(s.TimeDelta);
 
             float fallSpeed, despawnY;
             PlaceAt(s.transform, item.Distance, item.Lateral, here, speed, out fallSpeed, out despawnY);
 
-            OpenSpecialPortal(s.IsHazard, s.transform.position);
+            LogSpecialEmit(s, here);
+
+            bool portal = OpenSpecialPortal(s.IsHazard, s.transform.position);
             s.Configure(game, this);
             s.gameObject.SetActive(true);
-            s.Launch(fallSpeed, despawnY, game, PortalHold);
+            s.Launch(fallSpeed, despawnY, game, PortalHold, portal);
             _active++;
             Emitted?.Invoke();
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        private void LogSpecialEmit(SpecialItem s, float here)
+        {
+            Debug.Log("[CrystalSpawner] SPECIAL spawned: " + s.name +
+                      (s.IsHazard ? " (hazard)" : " (power up)") +
+                      " at " + s.transform.position.ToString("0.0") +
+                      ", cart at " + here.ToString("0") + " m");
+        }
+
+        private bool Available(SpecialKind kind)
+        {
+            Queue<SpecialItem> pool;
+            return _specialPools.TryGetValue(kind, out pool) && pool.Count > 0;
+        }
+
+        /// The requested kind if it is in stock, otherwise anything of the same CATEGORY, running
+        /// a pool dry should cost the exact item, never the beat itself
+        private SpecialItem TakeSpecial(SpecialKind wanted, bool hazard)
+        {
+            Queue<SpecialItem> pool;
+            if (_specialPools.TryGetValue(wanted, out pool) && pool.Count > 0)
+                return pool.Dequeue();
+
+            foreach (var entry in _specialPools)
+            {
+                if (entry.Value.Count == 0) continue;
+
+                // Never substitute a Time Orb for a scheduled power up, that is exactly the
+                // "time extend spawning for no reason" the debt system exists to prevent
+                if (entry.Key == SpecialKind.TimeOrb) continue;
+
+                var candidate = entry.Value.Peek();
+                if (candidate.IsHazard != hazard) continue;
+
+                return entry.Value.Dequeue();
+            }
+            return null;
         }
 
         private void PlaceAt(Transform t, float distance, float lateral, float here, float speed,
@@ -304,14 +386,16 @@ namespace IntuitiveDesigns.CrystalCatch
             despawnY = basePos.y - 1.5f;
         }
 
-        private void OpenCrystalPortal(CrystalColour colour, Vector3 at)
+        /// True when a portal actually opened. False means the item must stay VISIBLE through its
+        /// hold, or it appears out of nothing when the hold ends
+        private bool OpenCrystalPortal(CrystalColour colour, Vector3 at)
         {
-            if (SpawnPortalPool.Instance != null) SpawnPortalPool.Instance.PlayCrystal(colour, at);
+            return SpawnPortalPool.Instance != null && SpawnPortalPool.Instance.PlayCrystal(colour, at);
         }
 
-        private void OpenSpecialPortal(bool hazard, Vector3 at)
+        private bool OpenSpecialPortal(bool hazard, Vector3 at)
         {
-            if (SpawnPortalPool.Instance != null) SpawnPortalPool.Instance.PlaySpecial(hazard, at);
+            return SpawnPortalPool.Instance != null && SpawnPortalPool.Instance.PlaySpecial(hazard, at);
         }
 
         /// 0 when there is no pool in the scene, so removing the pool cleanly restores the old timing
@@ -360,7 +444,9 @@ namespace IntuitiveDesigns.CrystalCatch
         public void Return(SpecialItem s)
         {
             s.gameObject.SetActive(false);
-            (s.IsHazard ? _hazardQueue : _powerUpQueue).Enqueue(s);
+
+            Queue<SpecialItem> pool;
+            if (_specialPools.TryGetValue(s.Kind, out pool)) pool.Enqueue(s);
             _active = Mathf.Max(0, _active - 1);
         }
     }

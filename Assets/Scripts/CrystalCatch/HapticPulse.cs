@@ -9,14 +9,21 @@ namespace IntuitiveDesigns.CrystalCatch
         public static HapticPulse Instance { get; private set; }
 
         [Header("Feel (data)")]
-        [SerializeField] private float frequency = 0.7f;
+        [SerializeField] private float frequency = 1f;
         [SerializeField] private float hitSeconds = 0.07f;
         [SerializeField] private float minAmplitude = 0.45f;
         [SerializeField] private float maxAmplitude = 1f;
         [SerializeField] private bool enableHaptics = true;
 
+        [Header("Both hands (data)")]
+        [SerializeField, Range(0f, 1f)] private float offHandShare = 0.75f;
+
+        [Header("Diagnostics")]
+        [SerializeField] private bool logDeviceStateOnce = false;
+
         private int _leftToken;
         private int _rightToken;
+        private bool _logged;
 
         private void Awake()
         {
@@ -42,6 +49,23 @@ namespace IntuitiveDesigns.CrystalCatch
             Pulse(hand, amplitude, hitSeconds);
         }
 
+        public void HitBoth(VRAvatarLimbType swingingHand, float strength01)
+        {
+            if (!enableHaptics) return;
+
+            float amplitude = Mathf.Lerp(minAmplitude, maxAmplitude, Mathf.Clamp01(strength01));
+
+            Pulse(swingingHand, amplitude, hitSeconds);
+
+            if (offHandShare <= 0.001f) return;
+
+            var other = swingingHand == VRAvatarLimbType.LeftHand
+                      ? VRAvatarLimbType.RightHand
+                      : VRAvatarLimbType.LeftHand;
+
+            Pulse(other, amplitude * offHandShare, hitSeconds);
+        }
+
         public void Pulse(VRAvatarLimbType hand, float amplitude, float seconds)
         {
             if (!enableHaptics) return;
@@ -51,9 +75,28 @@ namespace IntuitiveDesigns.CrystalCatch
 
             int token = left ? ++_leftToken : ++_rightToken;
 
-            OVRInput.SetControllerVibration(frequency, Mathf.Clamp01(amplitude), controller);
+            LogDeviceState();
+            Vibrate(controller, frequency, Mathf.Clamp01(amplitude));
             LogPulse(controller, amplitude, seconds);
             StartCoroutine(StopAfter(controller, left, token, seconds));
+        }
+
+        private static void Vibrate(OVRInput.Controller controller, float freq, float amp)
+        {
+            if (OVRPlugin.initialized)
+                OVRPlugin.SetControllerVibration((uint)controller, freq, amp);
+            else
+                OVRInput.SetControllerVibration(freq, amp, controller);
+        }
+
+        private void LogDeviceState()
+        {
+            if (!logDeviceStateOnce || _logged) return;
+            _logged = true;
+            Debug.Log("[Haptic] OVRPlugin.initialized=" + OVRPlugin.initialized +
+                      " loadedXRDevice=" + OVRManager.loadedXRDevice +
+                      " connected=" + OVRInput.GetConnectedControllers() +
+                      " active=" + OVRInput.GetActiveController());
         }
 
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
@@ -71,14 +114,14 @@ namespace IntuitiveDesigns.CrystalCatch
             // A newer pulse has taken over this controller, so stopping now would cut it short
             if (token != (left ? _leftToken : _rightToken)) yield break;
 
-            OVRInput.SetControllerVibration(0f, 0f, controller);
+            Vibrate(controller, 0f, 0f);
         }
 
         [ContextMenu("Stop all vibration")]
         public void StopAll()
         {
-            OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.LTouch);
-            OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
+            Vibrate(OVRInput.Controller.LTouch, 0f, 0f);
+            Vibrate(OVRInput.Controller.RTouch, 0f, 0f);
         }
     }
 }

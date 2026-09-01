@@ -16,6 +16,10 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private TMP_Text multiplierText;
         [SerializeField] private TMP_Text centerText;       // Countdown/GO/final score
 
+        [Header("Round counter")]
+        [SerializeField] private TMP_Text roundText;
+        [SerializeField] private RectTransform roundFill;
+
         [Header("Onboarding")]
         [SerializeField] private string pickupPrompt = "TAKE THE PICKAXE";
 
@@ -65,6 +69,7 @@ namespace IntuitiveDesigns.CrystalCatch
                 {
                     _lastSecondShown = sec;
                     timerText.text = FormatTime(game.TimeRemaining);
+                    UpdateRoundReadout();
                 }
             }
 
@@ -103,9 +108,32 @@ namespace IntuitiveDesigns.CrystalCatch
                               "\nTotal " + total.ToString("N0");
         }
 
+        private void UpdateRoundReadout()
+        {
+            int max = game.MaxRounds;
+
+            if (roundText != null)
+            {
+                roundText.text = max > 0
+                    ? "ROUND " + game.RoundNumber + " / " + max
+                    : "ROUND " + game.RoundNumber;
+            }
+
+            if (roundFill == null) return;
+
+            // Rounds already banked, plus how far into the current one. ElapsedNormalized is 0 at
+            // the start of a round and 1 at its final second
+            float progress = max > 0
+                ? Mathf.Clamp01(((game.RoundNumber - 1) + game.ElapsedNormalized) / max)
+                : game.ElapsedNormalized;
+
+            roundFill.localScale = new Vector3(progress, 1f, 1f);
+        }
+
         private void OnRoundStarted(int roundNumber)
         {
             _lastSecondShown = -1;   // Force the timer string to refresh for the new round
+            UpdateRoundReadout();
             if (centerText == null) return;
 
             // Round 1 is introduced by the 3-2-1 countdown, so it needs no banner of its own
@@ -116,7 +144,7 @@ namespace IntuitiveDesigns.CrystalCatch
         private void OnCountdownTick(int n)
         {
             if (centerText != null) centerText.text = n.ToString();
-            // TODO: pulse/scale-punch the number for arcade feel
+            // TODO: pulse/scale punch the number for arcade feel
         }
 
         private void OnGo()
@@ -143,6 +171,10 @@ namespace IntuitiveDesigns.CrystalCatch
             if (playPanel == null) return;
             playPanel.alpha = visible ? 1f : 0f;
             playPanel.gameObject.SetActive(visible);
+
+            // The panel spends the countdown deactivated, so the round readout would otherwise show
+            // whatever it held at the end of the PREVIOUS round for the first second of this one
+            if (visible) UpdateRoundReadout();
         }
 
         private void BillboardToHead()

@@ -132,7 +132,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 EditorGUILayout.HelpBox(
                     "Every segment is within limits, but there is a turn lasting " +
                     longestTurnSeconds.ToString("0") + " s. Sustained rotation builds vection even " +
-                    "at a legal rate — shorten maxTurnRun if testers report drift.",
+                    "at a legal rate, shorten maxTurnRun if testers report drift.",
                     MessageType.Warning);
             }
             else

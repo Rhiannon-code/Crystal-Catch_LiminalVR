@@ -47,6 +47,14 @@ namespace IntuitiveDesigns.CrystalCatch
         [SerializeField] private AudioSource approachCue;
         [SerializeField] private AudioSource shieldBlockedCue;
 
+        /// The spawner pools by kind now that selection is weighted, and the director names a
+        /// concrete kind at schedule time so a Bomb can be paired with a Shield
+        public SpecialKind Kind { get { return kind; } }
+
+        /// How much time this item is worth. Read by the spawner so a repayment orb settles exactly
+        /// the debt it was spawned to settle, rather than a number duplicated in two places
+        public float TimeDelta { get { return Mathf.Abs(timeDelta); } }
+
         public bool IsHazard =>
             kind == SpecialKind.TimeDrainClock || kind == SpecialKind.Bomb || kind == SpecialKind.SlowHourglass;
 
@@ -81,8 +89,14 @@ namespace IntuitiveDesigns.CrystalCatch
         /// holdSeconds keeps it hidden at the spawn point while its portal opens
         public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game, float holdSeconds)
         {
+            Launch(fallSpeed, despawnY, game, holdSeconds, true);
+        }
+
+        public void Launch(float fallSpeed, float despawnY, CrystalCatchGame game, float holdSeconds,
+                           bool hideWhileHeld)
+        {
             _consumed = false;
-            _mover.Launch(fallSpeed, despawnY, game, holdSeconds);
+            _mover.Launch(fallSpeed, despawnY, game, holdSeconds, hideWhileHeld);
             if (approachCue != null) approachCue.Play();   // Telegraph incoming
         }
 
@@ -110,22 +124,85 @@ namespace IntuitiveDesigns.CrystalCatch
             // Shield fizzles hazards on contact (the game manager's hazard methods also no op while shielded)
             bool blocked = IsHazard && game.IsShielded;
             Apply(game);
+            Announce(game, blocked);
+            LogHit(game, blocked);
 
-            // Detached pooled FX, Return() below deactivates this GameObject in the same frame, so a
-            // child ParticleSystem/AudioSource would be killed before it played
-            if (!blocked && CatchFXPool.Instance != null)
+            if (CatchFXPool.Instance != null)
             {
                 CatchFXPool.Instance.PlaySpecial(transform.position, hitVelocity);
             }
             else
             {
+                // Fallback only. These live on THIS GameObject, so they are unreliable by
+                // construction, which is the whole reason the pool exists
                 if (blocked && shieldBlockedCue != null) shieldBlockedCue.Play();
                 else if (sfx != null) sfx.Play();
-                if (!blocked && burst != null) burst.Play();
+                if (burst != null) burst.Play();
             }
 
             if (_pool != null) _pool.Return(this);
             else gameObject.SetActive(false);
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        private void LogHit(CrystalCatchGame game, bool blocked)
+        {
+            bool rowExpected =
+                kind == SpecialKind.Shield || kind == SpecialKind.ScoreGem ||
+                kind == SpecialKind.Bomb   || kind == SpecialKind.SlowHourglass ||
+                kind == SpecialKind.ReachBoost || kind == SpecialKind.ArcBoost;
+
+            Debug.Log("[SpecialItem] HIT " + kind + (blocked ? " (BLOCKED by shield)" : "") +
+                      " -> " + (rowExpected
+                          ? "expect a HUD row"
+                          : "instantaneous, NO HUD row is correct for this kind"));
+        }
+
+        private void Announce(CrystalCatchGame g, bool blocked)
+        {
+            if (blocked)
+            {
+                // Named, because "BLOCKED" alone does not tell you what your shield just ate
+                g.RaiseNotice(DisplayName + " BLOCKED", false);
+                return;
+            }
+
+            switch (kind)
+            {
+                case SpecialKind.TimeOrb:
+                    g.RaiseNotice(DisplayName + "  +" + Mathf.RoundToInt(Mathf.Abs(timeDelta)) + "s", false);
+                    break;
+
+                case SpecialKind.TimeDrainClock:
+                    g.RaiseNotice(DisplayName + "  -" + Mathf.RoundToInt(Mathf.Abs(timeDelta)) + "s", true);
+                    break;
+
+                case SpecialKind.CrashCrystals:
+                    g.RaiseNotice(DisplayName, false);
+                    break;
+            }
+        }
+
+        /// Matches the colour each prefab is tinted with, so the word and the cube agree
+        public string DisplayName
+        {
+            get
+            {
+                switch (kind)
+                {
+                    case SpecialKind.TimeOrb:        return "TIME ORB";
+                    case SpecialKind.Shield:         return "SHIELD";
+                    case SpecialKind.ScoreGem:       return "SCORE GEM";
+                    case SpecialKind.CrashCrystals:  return "CRYSTAL RUSH";
+                    case SpecialKind.TimeDrainClock: return "TIME DRAIN";
+                    case SpecialKind.Bomb:           return "BOMB";
+                    case SpecialKind.SlowHourglass:  return "SLOW TIME";
+                    case SpecialKind.ReachBoost:     return "LONG PICK";
+                    case SpecialKind.ArcBoost:       return "WIDE SWING";
+                }
+                return kind.ToString();
+            }
         }
 
         private void Apply(CrystalCatchGame g)
