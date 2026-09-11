@@ -262,7 +262,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             {
                 SetRef(spawner, "director", director);
                 Debug.Log("[CCCartBuilder] Spawner is now schedule driven. Item positions come from " +
-                          "SpawnDirector; the old per-tick rolls are the fallback if it is unassigned.");
+                          "SpawnDirector; the old per tick rolls are the fallback if it is unassigned.");
             }
 
             BuildEffectHud(game);
@@ -933,7 +933,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 Slot(SpawnSlotKind.PowerUp, 22f, 0.65f),
             }));
 
-            // The actual decision: a gold sitting between two hazards. Taking it is a choice, and
+            // The actual decision, a gold sitting between two hazards. Taking it is a choice, and
             // leaving it is a legitimate one
             made.Add(MakePatternWithColour("Gauntlet", "Gold between hazards", 0.25f, 1f, new[]
             {
@@ -950,7 +950,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 Slot(SpawnSlotKind.Hazard, 0f, 0.8f),
             }));
 
-            // Tightening spacing. Late only: it is the one pattern that is genuinely fast
+            // Tightening spacing. Late only, it is the one pattern that is genuinely fast
             made.Add(MakePattern("Crescendo", "Tightening run", 0.55f, 1f, new[]
             {
                 Slot(SpawnSlotKind.Crystal, 0f, -0.5f),
@@ -1074,7 +1074,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                 int columns = Mathf.Max(1, Mathf.CeilToInt(ShaftLength / stepZ));
                 int rows = Mathf.Max(1, Mathf.CeilToInt(ShaftHeight / stepY));
 
-                // Aligned by min corner: the panel's own thickness sits OUTSIDE the shaft width
+                // Aligned by min corner, the panel's own thickness sits OUTSIDE the shaft width
                 // either way, so the clear corridor is what ShaftHalfWidth says it is
                 float x = side < 0f ? -ShaftHalfWidth - size.x : ShaftHalfWidth;
 
@@ -1131,8 +1131,8 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             int beamsAcross = Mathf.Max(1, Mathf.CeilToInt(ShaftHalfWidth * 2f / beamLength));
             float beamStartX = -ShaftHalfWidth + beamLength * 0.5f;
 
-            // Three sets: mouth, gate, and exit. Enough to read as structure, few enough that they
-            // do not become a picket fence strobing past at speed (the ADR 0014 frame-spacing trap)
+            // Three sets, mouth, gate, and exit. Enough to read as structure, few enough that they
+            // do not become a picket fence strobing past at speed
             for (int i = 0; i < 3; i++)
             {
                 float z = -ShaftLength * 0.5f + ShaftLength * 0.5f * i;
@@ -1334,7 +1334,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         }
 
         /// Size of a kit piece after a rotation, for working out how many fit across a span. Only
-        /// correct for axis-aligned rotations, which is all this builder uses
+        /// correct for axis aligned rotations, which is all this builder uses
         private static Vector3 RotatedSize(string kitPath, Quaternion rot)
         {
             Vector3 s = rot * KitBounds(kitPath).size;
@@ -1416,9 +1416,9 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
                     mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
 
                     Debug.LogWarning("[CCCartBuilder] " + meshAssetPath + " / " + pair.Key.name +
-                                     " combines to " + vertices + " vertices, over the 65535 16-bit " +
-                                     "limit. Using 32-bit indices. On Quest 2 this is worth avoiding: " +
-                                     "consider splitting the piece or using a lower-density kit mesh.");
+                                     " combines to " + vertices + " vertices, over the 65535 16 bit " +
+                                     "limit. Using 32 bit indices. On Quest 2 this is worth avoiding: " +
+                                     "consider splitting the piece or using a lower density kit mesh.");
                 }
 
                 mesh.CombineMeshes(combines, true, true);
