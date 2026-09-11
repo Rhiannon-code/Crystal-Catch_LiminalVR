@@ -14,7 +14,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
         [MenuItem("Crystal Catch/Quest/Configure Player Settings for Quest 2")]
         public static void Configure()
         {
-            // IL2CPP first: ARM64 is not a legal architecture under Mono, so setting them the other
+            // IL2CPP first, ARM64 is not a legal architecture under Mono, so setting them the other
             // way round silently leaves you on ARMv7
             PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
@@ -30,7 +30,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
             PlayerSettings.virtualRealitySupported = true;
             PlayerSettings.SetVirtualRealitySDKs(BuildTargetGroup.Android, new[] { "Oculus" });
 
-            // Single pass halves the per-eye draw cost and is the only sane default on a Quest 2
+            // Single pass halves the per eye draw cost and is the only sane default on a Quest 2
             PlayerSettings.stereoRenderingPath = StereoRenderingPath.SinglePass;
 
             EditorUserBuildSettings.androidBuildSystem = AndroidBuildSystem.Gradle;
