@@ -9,8 +9,6 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
     {
         private const string ObjectName = "PerfReadout";
 
-        // Quest 2 runs its display at 72 Hz on this SDK's legacy Oculus path, so 72 is the budget
-        // that matters (13.9 ms). Aiming at 90 would paint everything red for no reason
         private const float QuestRefreshHz = 72f;
 
         [MenuItem("Crystal Catch/Quest/Add Perf Readout To HUD")]

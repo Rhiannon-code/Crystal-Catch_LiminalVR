@@ -109,7 +109,7 @@ namespace IntuitiveDesigns.CrystalCatch
 
         private IEnumerator StopAfter(OVRInput.Controller controller, bool left, int token, float seconds)
         {
-            yield return new WaitForSeconds(seconds);
+            yield return new WaitForSecondsRealtime(seconds);
 
             // A newer pulse has taken over this controller, so stopping now would cut it short
             if (token != (left ? _leftToken : _rightToken)) yield break;

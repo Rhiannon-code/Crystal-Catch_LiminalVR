@@ -6,12 +6,7 @@ namespace IntuitiveDesigns.CrystalCatch.EditorTools
     [CustomEditor(typeof(TrackPath))]
     public class TrackPathEditor : Editor
     {
-        // Every 25th point at 2 m spacing is a handle every 50 m. Dense enough to shape a corner,
-        // sparse enough that the scene view is not a wall of dots
         private const int DefaultStride = 25;
-
-        // A dragged handle pulls its neighbours with it on a smoothstep falloff. Moving a single
-        // sample would put a spike in the track, which is a kink the cart would slam through
         private const int DefaultFalloff = 20;
 
         private static bool _editPoints;
