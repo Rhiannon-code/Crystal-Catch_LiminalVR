@@ -15,13 +15,14 @@ namespace IntuitiveDesigns.ShootingRange
         [Header("Refs")]
         [SerializeField] private Arena arena;
         [SerializeField] private ComboTracker combo;
+        [SerializeField] private TrackDirector director;
 
         [Header("Session (data)")]
         [SerializeField] private float roundSeconds = 60f;
         [SerializeField] private int maxRounds = 5;
         [SerializeField] private int countdownFrom = 3;
         [SerializeField] private float countdownStep = 1f;
-        [SerializeField] private float roundTallySeconds = 4f;
+        [SerializeField] private float roundTallySeconds = 3f;
         [SerializeField] private float endHoldSeconds = 3f;
         [SerializeField] private float endFadeSeconds = 2f;
 
@@ -30,8 +31,6 @@ namespace IntuitiveDesigns.ShootingRange
 
         [Header("Clearing (data)")]
         [SerializeField] private float clearBonusPerSecond = 20f;
-
-        // A practice scene wants to keep running after the last plate goes over
         [SerializeField] private bool endRoundOnClear = true;
 
         public State Current { get; private set; } = State.WaitingForPickup;
@@ -42,6 +41,7 @@ namespace IntuitiveDesigns.ShootingRange
         public int MaxRounds { get { return maxRounds; } }
         public float RoundSeconds { get { return roundSeconds; } }
         public bool IsFinalRound { get { return maxRounds > 0 && RoundNumber >= maxRounds; } }
+        public int NextRoundNumber { get { return RoundNumber + 1; } }
 
         public event Action<int> ScoreChanged;
         public event Action<float> TimeChanged;
@@ -53,6 +53,7 @@ namespace IntuitiveDesigns.ShootingRange
         public event Action<int> RoundCleared;
         public event Action<int> FinalScore;
         public event Action<Vector3, bool> Scoring;
+        public event Action<Vector3> PlayerHit;
 
         private bool _begun;
 
@@ -89,8 +90,6 @@ namespace IntuitiveDesigns.ShootingRange
             StartCoroutine(RunSession());
         }
 
-        /// Called by every Knockable that is hit or goes over. Multiplied here rather than at the
-        /// prop, so the combo rule lives in one place
         public void Scored(int points, Vector3 where, bool chained)
         {
             if (Current != State.Playing) return;
@@ -103,6 +102,15 @@ namespace IntuitiveDesigns.ShootingRange
             if (Scoring != null) Scoring(where, chained);
         }
 
+        /// A vampire or a bat got to the player. It costs the combo and nothing else
+        public void HitPlayer(Vector3 from)
+        {
+            if (Current != State.Playing) return;
+
+            if (combo != null) combo.Reset(true);
+            if (PlayerHit != null) PlayerHit(from);
+        }
+
         private void AddScore(int points)
         {
             RoundScore += points;
@@ -113,14 +121,7 @@ namespace IntuitiveDesigns.ShootingRange
         private IEnumerator RunSession()
         {
             SetState(State.Intro);
-
-            for (int n = countdownFrom; n >= 1; n--)
-            {
-                if (CountdownTick != null) CountdownTick(n);
-                yield return new WaitForSecondsRealtime(countdownStep);
-            }
-
-            if (CountdownGo != null) CountdownGo();
+            yield return StartCoroutine(Countdown());
 
             for (RoundNumber = 1; RoundNumber <= maxRounds; RoundNumber++)
             {
@@ -130,9 +131,21 @@ namespace IntuitiveDesigns.ShootingRange
 
                 SetState(State.RoundEnd);
                 yield return new WaitForSecondsRealtime(roundTallySeconds);
+                yield return StartCoroutine(Countdown());
             }
 
             yield return StartCoroutine(EndExperience());
+        }
+
+        private IEnumerator Countdown()
+        {
+            for (int n = countdownFrom; n >= 1; n--)
+            {
+                if (CountdownTick != null) CountdownTick(n);
+                yield return new WaitForSecondsRealtime(countdownStep);
+            }
+
+            if (CountdownGo != null) CountdownGo();
         }
 
         private IEnumerator RunRound()
@@ -154,10 +167,13 @@ namespace IntuitiveDesigns.ShootingRange
                 TimeRemaining -= Time.unscaledDeltaTime;
                 if (TimeChanged != null) TimeChanged(Mathf.Max(0f, TimeRemaining));
 
-                if (endRoundOnClear && arena != null && arena.IsCleared)
+                if (RoundGoalMet())
                 {
                     cleared = true;
-                    AddScore(Mathf.RoundToInt(Mathf.Max(0f, TimeRemaining) * clearBonusPerSecond));
+
+                    // A wave also runs out when targets escape, and that is not worth a bonus
+                    if (director == null || director.Killed >= director.WaveSize)
+                        AddScore(Mathf.RoundToInt(Mathf.Max(0f, TimeRemaining) * clearBonusPerSecond));
                     break;
                 }
 
@@ -168,6 +184,13 @@ namespace IntuitiveDesigns.ShootingRange
 
             if (cleared && RoundCleared != null) RoundCleared(RoundNumber);
             if (RoundEnded != null) RoundEnded(RoundNumber, RoundScore);
+        }
+
+        /// A range with traffic ends on its wave, a practice shelf on its plates
+        private bool RoundGoalMet()
+        {
+            if (director != null) return director.WaveCleared;
+            return endRoundOnClear && arena != null && arena.IsCleared;
         }
 
         private IEnumerator EndExperience()

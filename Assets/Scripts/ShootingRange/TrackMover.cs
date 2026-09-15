@@ -1,9 +1,8 @@
+using System;
 using UnityEngine;
 
 namespace IntuitiveDesigns.ShootingRange
 {
-    /// A carnival target riding a rail. Kinematic, because a collider that moves without a Rigidbody
-    /// makes PhysX rebuild its static tree every step
     [RequireComponent(typeof(Rigidbody))]
     public class TrackMover : MonoBehaviour, IShootable
     {
@@ -19,6 +18,9 @@ namespace IntuitiveDesigns.ShootingRange
 
         public float MoverLength { get { return moverLength; } }
         public bool Running { get { return _running; } }
+
+        /// Shot (true), or reached the end of its rail (false)
+        public event Action<TrackMover, bool> Resolved;
 
         private Rigidbody _body;
         private TrackRail _rail;
@@ -60,7 +62,7 @@ namespace IntuitiveDesigns.ShootingRange
 
             _distance += _speed * Time.fixedDeltaTime;
 
-            if (_distance >= _rail.Length) { Retire(); return; }
+            if (_distance >= _rail.Length) { ReachEnd(); return; }
 
             _body.MovePosition(_rail.PointAt(_distance));
         }
@@ -69,21 +71,32 @@ namespace IntuitiveDesigns.ShootingRange
         {
             if (!_running) return;
 
-            _running = false;
-
             if (ShatterPool.Instance != null)
                 ShatterPool.Instance.Burst(transform.position, fragments, direction, fragmentImpulse);
 
             if (RangeGame.Instance != null) RangeGame.Instance.Scored(hitScore, point, false);
 
-            Retire();
+            Resolve(true);
         }
 
-        private void Retire()
+        /// Taken off the range between rounds, which is not an outcome, so nobody hears about it
+        public void Stop()
         {
             _running = false;
             _rail = null;
             gameObject.SetActive(false);
+        }
+
+        private void ReachEnd()
+        {
+            if (_rail.ReachesPlayer && RangeGame.Instance != null) RangeGame.Instance.HitPlayer(transform.position);
+            Resolve(false);
+        }
+
+        private void Resolve(bool shot)
+        {
+            Stop();
+            if (Resolved != null) Resolved(this, shot);
         }
     }
 }

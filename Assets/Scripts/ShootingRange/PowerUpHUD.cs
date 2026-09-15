@@ -12,9 +12,17 @@ namespace IntuitiveDesigns.ShootingRange
         [SerializeField] private float calloutSeconds = 1.4f;
         [SerializeField] private float refreshInterval = 0.1f;
 
-        private readonly StringBuilder _line = new StringBuilder(64);
+        private readonly StringBuilder _line = new StringBuilder(128);
+        private string[] _hex;
         private float _nextRefresh;
         private float _calloutUntil;
+
+        private void Awake()
+        {
+            _hex = new string[PowerUps.KindCount];
+            for (int i = 0; i < _hex.Length; i++)
+                _hex[i] = powerUps != null ? ColorUtility.ToHtmlStringRGB(powerUps.Colour((PowerUpKind)i)) : "FFFFFF";
+        }
 
         private void OnEnable()
         {
@@ -36,7 +44,7 @@ namespace IntuitiveDesigns.ShootingRange
         {
             if (calloutText == null) return;
 
-            calloutText.text = PowerUps.Label(kind) + "!";
+            calloutText.text = "<color=#" + _hex[(int)kind] + ">" + PowerUps.Label(kind) + "!</color>";
             _calloutUntil = Time.unscaledTime + calloutSeconds;
         }
 
@@ -54,13 +62,15 @@ namespace IntuitiveDesigns.ShootingRange
             _nextRefresh = now + refreshInterval;
 
             _line.Length = 0;
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PowerUps.KindCount; i++)
             {
                 var kind = (PowerUpKind)i;
                 if (!powerUps.IsActive(kind)) continue;
 
                 if (_line.Length > 0) _line.Append("   ");
-                _line.Append(PowerUps.Label(kind)).Append(' ').Append(Mathf.CeilToInt(powerUps.Remaining(kind)));
+                _line.Append("<color=#").Append(_hex[i]).Append('>')
+                     .Append(PowerUps.Label(kind)).Append(' ').Append(Mathf.CeilToInt(powerUps.Remaining(kind)))
+                     .Append("</color>");
             }
 
             activeText.text = _line.ToString();

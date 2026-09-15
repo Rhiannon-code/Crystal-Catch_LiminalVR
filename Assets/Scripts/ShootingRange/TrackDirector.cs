@@ -21,6 +21,10 @@ namespace IntuitiveDesigns.ShootingRange
         [Header("Pool")]
         [SerializeField] private int poolSize = 32;
 
+        [Header("Wave size (data)")]
+        [SerializeField] private int waveSizeFirstRound = 30;
+        [SerializeField] private int waveSizeGrowthPerRound = 20;
+
         [Header("Pace (data, round 1)")]
         [SerializeField] private float waveInterval = 2.2f;
         [SerializeField] private float minSpeed = 1.3f;
@@ -30,7 +34,7 @@ namespace IntuitiveDesigns.ShootingRange
         [Header("Escalation per round (data)")]
         [SerializeField] private float waveScalePerRound = 0.82f;
         [SerializeField] private float speedScalePerRound = 1.12f;
-        [SerializeField] private int extraTargetsPerRound = 2;
+        [SerializeField] private int extraConcurrentPerRound = 2;
         [SerializeField] private float minWaveInterval = 0.6f;
 
         [Header("Refusals (data)")]
@@ -50,8 +54,14 @@ namespace IntuitiveDesigns.ShootingRange
         };
 
         public event Action<TrackPatternKind> PatternStarted;
+        public event Action<int> TargetsLeftChanged;
 
         public int ConcurrencyCap { get { return _concurrency; } }
+        public TrackMover[] Movers { get { return _pool; } }
+        public int WaveSize { get { return _waveSize; } }
+        public int Killed { get { return _killed; } }
+        public int TargetsLeft { get { return Mathf.Max(0, _waveSize - _resolved); } }
+        public bool WaveCleared { get { return _waveSize > 0 && _resolved >= _waveSize; } }
 
         private struct Pending
         {
@@ -69,6 +79,10 @@ namespace IntuitiveDesigns.ShootingRange
         private float _waveInterval;
         private float _speedScale = 1f;
         private int _concurrency;
+        private int _waveSize;
+        private int _launched;
+        private int _resolved;
+        private int _killed;
 
         private void Awake()
         {
@@ -87,38 +101,56 @@ namespace IntuitiveDesigns.ShootingRange
             {
                 _pool[i] = Instantiate(moverPrefab, transform);
                 _pool[i].gameObject.SetActive(false);
+                _pool[i].Resolved += OnResolved;
             }
         }
 
         private void OnEnable()
         {
-            if (game != null) game.RoundStarted += OnRoundStarted;
+            if (game == null) return;
+
+            game.RoundStarted += OnRoundStarted;
+            game.RoundEnded += OnRoundEnded;
         }
 
         private void OnDisable()
         {
-            if (game != null) game.RoundStarted -= OnRoundStarted;
+            if (game == null) return;
+
+            game.RoundStarted -= OnRoundStarted;
+            game.RoundEnded -= OnRoundEnded;
         }
 
         private void OnRoundStarted(int round)
         {
             int steps = Mathf.Max(0, round - 1);
 
+            _waveSize = Mathf.Max(1, waveSizeFirstRound + waveSizeGrowthPerRound * steps);
+            _launched = 0;
+            _resolved = 0;
+            _killed = 0;
+
             _waveInterval = Mathf.Max(minWaveInterval, waveInterval * Mathf.Pow(waveScalePerRound, steps));
             _speedScale = Mathf.Pow(speedScalePerRound, steps);
-            _concurrency = Mathf.Min(poolSize, concurrentTargets + extraTargetsPerRound * steps);
+            _concurrency = Mathf.Min(poolSize, concurrentTargets + extraConcurrentPerRound * steps);
 
             RebuildUnlocked(round);
 
             _pending.Clear();
             _nextWave = Time.time;
+            RaiseTargetsLeft();
 
+            Debug.Log("[TrackDirector] Round " + round + ": " + _waveSize + " targets, wave every " +
+                      _waveInterval.ToString("0.00") + " s, speed x" + _speedScale.ToString("0.00") +
+                      ", up to " + _concurrency + " at once, " + _unlocked.Count + " patterns in play.");
+        }
+
+        private void OnRoundEnded(int round, int roundScore)
+        {
+            _pending.Clear();
             if (grid != null) grid.ClearTraffic();
-            RetireAll();
 
-            Debug.Log("[TrackDirector] Round " + round + ": wave every " + _waveInterval.ToString("0.00") +
-                      " s, speed x" + _speedScale.ToString("0.00") + ", up to " + _concurrency +
-                      " targets, " + _unlocked.Count + " patterns in play.");
+            for (int i = 0; i < _pool.Length; i++) _pool[i].Stop();
         }
 
         private void RebuildUnlocked(int round)
@@ -141,7 +173,7 @@ namespace IntuitiveDesigns.ShootingRange
 
             ReleaseDue();
 
-            if (Time.time < _nextWave) return;
+            if (Time.time < _nextWave || _launched + _pending.Count >= _waveSize) return;
 
             _nextWave = Time.time + _waveInterval;
             StartWave();
@@ -153,12 +185,15 @@ namespace IntuitiveDesigns.ShootingRange
 
             var kind = _unlocked[UnityEngine.Random.Range(0, _unlocked.Count)];
             TrackPattern.Build(kind, grid.Rails, _launches);
-            if (_launches.Count == 0) return;
+
+            // The last pattern of a wave is cut short rather than overfilling it
+            int count = Mathf.Min(_launches.Count, _waveSize - _launched - _pending.Count);
+            if (count <= 0) return;
 
             float baseSpeed = UnityEngine.Random.Range(minSpeed, maxSpeed) * _speedScale;
 
             float now = Time.time;
-            for (int i = 0; i < _launches.Count; i++)
+            for (int i = 0; i < count; i++)
             {
                 var launch = _launches[i];
                 _pending.Add(new Pending
@@ -190,8 +225,21 @@ namespace IntuitiveDesigns.ShootingRange
                 if (!grid.TryDispatch(due.Rail, due.Speed, mover.MoverLength)) continue;
 
                 _pending.RemoveAt(i);
+                _launched++;
                 mover.Launch(due.Rail, due.Speed);
             }
+        }
+
+        private void OnResolved(TrackMover mover, bool shot)
+        {
+            _resolved++;
+            if (shot) _killed++;
+            RaiseTargetsLeft();
+        }
+
+        private void RaiseTargetsLeft()
+        {
+            if (TargetsLeftChanged != null) TargetsLeftChanged(TargetsLeft);
         }
 
         private int ActiveCount()
@@ -213,11 +261,6 @@ namespace IntuitiveDesigns.ShootingRange
             }
 
             return null;
-        }
-
-        private void RetireAll()
-        {
-            for (int i = 0; i < _pool.Length; i++) _pool[i].gameObject.SetActive(false);
         }
     }
 }

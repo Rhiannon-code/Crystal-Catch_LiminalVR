@@ -1,6 +1,5 @@
 using System;
 using UnityEngine;
-using Liminal.SDK.VR.Avatars;
 
 namespace IntuitiveDesigns.ShootingRange
 {
@@ -8,12 +7,9 @@ namespace IntuitiveDesigns.ShootingRange
     {
         FullAuto,
         Scattershot,
-        DualWield,
         SlowMotion,
     }
 
-    /// Which power-ups are live and for how long. Awarded on combo milestones and stacked freely
-    /// Timers run in real seconds, or slow motion would stretch every other power up to 3x its length
     public class PowerUps : MonoBehaviour
     {
         [Serializable]
@@ -22,26 +18,32 @@ namespace IntuitiveDesigns.ShootingRange
             public PowerUpKind kind;
             public float seconds = 8f;
             public int weight = 3;
+            public Color colour = Color.white;
+
+            // Off for slow motion, or a steady hit rate would hold the world slowed indefinitely
+            public bool extendsOnCombo = true;
         }
 
         public static PowerUps Instance { get; private set; }
+        public static readonly int KindCount = Enum.GetValues(typeof(PowerUpKind)).Length;
 
         [Header("Refs")]
         [SerializeField] private RangeGame game;
         [SerializeField] private ComboTracker combo;
-        [SerializeField] private Pistol mainPistol;
-        [SerializeField] private Pistol offHandPistol;
         [SerializeField] private SlowMotion slowMotion;
 
-        [Header("Durations and odds (data)")]
+        [Header("Durations, odds and colours (data)")]
         [SerializeField]
         private Tuning[] tuning =
         {
-            new Tuning { kind = PowerUpKind.FullAuto,    seconds = 8f,  weight = 3 },
-            new Tuning { kind = PowerUpKind.Scattershot, seconds = 8f,  weight = 3 },
-            new Tuning { kind = PowerUpKind.DualWield,   seconds = 10f, weight = 3 },
-            new Tuning { kind = PowerUpKind.SlowMotion,  seconds = 3f,  weight = 1 },
+            new Tuning { kind = PowerUpKind.FullAuto,    seconds = 8f, weight = 3, colour = new Color(1f, 0.55f, 0.05f) },
+            new Tuning { kind = PowerUpKind.Scattershot, seconds = 8f, weight = 3, colour = new Color(0.35f, 1f, 0.2f) },
+            new Tuning { kind = PowerUpKind.SlowMotion,  seconds = 3f, weight = 1, colour = new Color(0.7f, 0.45f, 1f), extendsOnCombo = false },
         };
+
+        [Header("Kept alive by the combo (data)")]
+        [SerializeField] private float secondsPerHit = 0.5f;
+        [SerializeField] private float maxLengthMultiple = 2f;
 
         [Header("Scattershot (data)")]
         [SerializeField] private int pellets = 5;
@@ -58,8 +60,8 @@ namespace IntuitiveDesigns.ShootingRange
         public int Pellets { get { return IsActive(PowerUpKind.Scattershot) ? Mathf.Max(1, pellets) : 1; } }
         public float PelletSpread { get { return pelletSpreadDegrees; } }
 
-        private static readonly int KindCount = Enum.GetValues(typeof(PowerUpKind)).Length;
         private readonly float[] _remaining = new float[KindCount];
+        private readonly float[] _grantedAt = new float[KindCount];
 
         public static string Label(PowerUpKind kind)
         {
@@ -67,7 +69,6 @@ namespace IntuitiveDesigns.ShootingRange
             {
                 case PowerUpKind.FullAuto: return "FULL AUTO";
                 case PowerUpKind.Scattershot: return "SCATTERSHOT";
-                case PowerUpKind.DualWield: return "DUAL WIELD";
                 case PowerUpKind.SlowMotion: return "SLOW-MO";
                 default: return kind.ToString().ToUpperInvariant();
             }
@@ -76,12 +77,16 @@ namespace IntuitiveDesigns.ShootingRange
         private void Awake()
         {
             Instance = this;
-            if (offHandPistol != null) offHandPistol.gameObject.SetActive(false);
         }
 
         private void OnEnable()
         {
-            if (combo != null) combo.MilestoneReached += OnMilestone;
+            if (combo != null)
+            {
+                combo.MilestoneReached += OnMilestone;
+                combo.Changed += OnComboChanged;
+            }
+
             if (game == null) return;
 
             game.RoundEnded += OnRoundEnded;
@@ -90,10 +95,15 @@ namespace IntuitiveDesigns.ShootingRange
 
         private void OnDisable()
         {
-            // SlowMotion restores time in its own OnDisable, so teardown only has to drop the timers
+            // SlowMotion restores time in its own OnDisable
             for (int i = 0; i < KindCount; i++) _remaining[i] = 0f;
 
-            if (combo != null) combo.MilestoneReached -= OnMilestone;
+            if (combo != null)
+            {
+                combo.MilestoneReached -= OnMilestone;
+                combo.Changed -= OnComboChanged;
+            }
+
             if (game == null) return;
 
             game.RoundEnded -= OnRoundEnded;
@@ -115,14 +125,37 @@ namespace IntuitiveDesigns.ShootingRange
             return Mathf.Max(0f, _remaining[(int)kind]);
         }
 
-        /// A repeat refreshes to full length rather than banking another stretch on top
-        public void Grant(PowerUpKind kind)
+        public Color Colour(PowerUpKind kind)
         {
             var entry = Find(kind);
-            float seconds = entry != null ? entry.seconds : 8f;
+            return entry != null ? entry.colour : Color.white;
+        }
+
+        /// The newest of the live power ups, which is the one the gun wears
+        public bool TryLatest(out PowerUpKind latest)
+        {
+            latest = PowerUpKind.FullAuto;
+            bool found = false;
+
+            for (int i = 0; i < KindCount; i++)
+            {
+                if (_remaining[i] <= 0f || (found && _grantedAt[i] <= _grantedAt[(int)latest])) continue;
+
+                latest = (PowerUpKind)i;
+                found = true;
+            }
+
+            return found;
+        }
+
+        /// A repeat adds its full length on top of what is left, up to the cap
+        public void Grant(PowerUpKind kind)
+        {
+            float seconds = BaseSeconds(kind);
             bool wasActive = IsActive(kind);
 
-            _remaining[(int)kind] = seconds;
+            AddTime((int)kind, seconds);
+            _grantedAt[(int)kind] = Time.unscaledTime;
 
             if (!wasActive) Apply(kind, true);
             if (Granted != null) Granted(kind, seconds);
@@ -161,6 +194,23 @@ namespace IntuitiveDesigns.ShootingRange
             Grant(Roll());
         }
 
+        private void OnComboChanged(float multiplier, int chain)
+        {
+            if (chain == 0) return;
+
+            for (int i = 0; i < KindCount; i++)
+            {
+                var entry = Find((PowerUpKind)i);
+                if (_remaining[i] > 0f && entry != null && entry.extendsOnCombo) AddTime(i, secondsPerHit);
+            }
+        }
+
+        private void AddTime(int index, float seconds)
+        {
+            float cap = BaseSeconds((PowerUpKind)index) * maxLengthMultiple;
+            _remaining[index] = Mathf.Min(Mathf.Max(0f, _remaining[index]) + seconds, cap);
+        }
+
         private void OnRoundEnded(int round, int roundScore)
         {
             ClearAll();
@@ -173,31 +223,10 @@ namespace IntuitiveDesigns.ShootingRange
 
         private void Apply(PowerUpKind kind, bool on)
         {
-            if (kind == PowerUpKind.DualWield)
-            {
-                SetOffHand(on);
-                return;
-            }
-
             if (kind != PowerUpKind.SlowMotion || slowMotion == null) return;
 
             if (on) slowMotion.Enter(slowScale);
             else slowMotion.Exit();
-        }
-
-        private void SetOffHand(bool on)
-        {
-            if (offHandPistol == null) return;
-
-            if (on && mainPistol != null)
-            {
-                offHandPistol.AssignHand(mainPistol.Hand == VRAvatarLimbType.LeftHand
-                                         ? VRAvatarLimbType.RightHand
-                                         : VRAvatarLimbType.LeftHand);
-            }
-
-            offHandPistol.gameObject.SetActive(on);
-            if (on) offHandPistol.SetHeld(true);
         }
 
         private PowerUpKind Roll()
@@ -214,6 +243,12 @@ namespace IntuitiveDesigns.ShootingRange
             }
 
             return tuning[tuning.Length - 1].kind;
+        }
+
+        private float BaseSeconds(PowerUpKind kind)
+        {
+            var entry = Find(kind);
+            return entry != null ? entry.seconds : 8f;
         }
 
         private Tuning Find(PowerUpKind kind)

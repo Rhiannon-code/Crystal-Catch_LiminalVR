@@ -16,6 +16,7 @@ namespace IntuitiveDesigns.ShootingRange
         [Header("Hold")]
         [SerializeField] private VRAvatarLimbType hand = VRAvatarLimbType.RightHand;
         [SerializeField] private bool followHandTransform = true;
+        [SerializeField] private bool fallBackToPrimaryHand = true;
         [SerializeField] private bool startHeld;
         [SerializeField] private Vector3 gripLocalPosition = Vector3.zero;
         [SerializeField] private Vector3 gripLocalEuler = Vector3.zero;
@@ -129,7 +130,7 @@ namespace IntuitiveDesigns.ShootingRange
 
             if (avatar.PrimaryHand != null && avatar.PrimaryHand.LimbType == hand) return avatar.PrimaryHand;
             if (avatar.SecondaryHand != null && avatar.SecondaryHand.LimbType == hand) return avatar.SecondaryHand;
-            return avatar.PrimaryHand;
+            return fallBackToPrimaryHand ? avatar.PrimaryHand : null;
         }
 
         private void FollowHand()
