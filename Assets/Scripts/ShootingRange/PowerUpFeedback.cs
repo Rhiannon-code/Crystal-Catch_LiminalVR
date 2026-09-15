@@ -6,20 +6,17 @@ namespace IntuitiveDesigns.ShootingRange
     {
         [Header("Refs")]
         [SerializeField] private PowerUps powerUps;
-        [SerializeField] private ComboTracker combo;
         [SerializeField] private SlowMotion slowMotion;
         [SerializeField] private Pistol[] guns;
         [SerializeField] private Transform floorPoint;
 
         [Header("Audio")]
-        [SerializeField] private AudioClip[] milestoneClips;
         [SerializeField] private AudioClip[] fullAutoClips;
         [SerializeField] private AudioClip[] scattershotClips;
-        [SerializeField] private AudioClip[] dualWieldClips;
         [SerializeField] private AudioClip[] slowMotionClips;
         [SerializeField] private AudioClip slowEnterClip;
         [SerializeField] private AudioClip slowExitClip;
-        [SerializeField, Range(0f, 1f)] private float volume = 0.8f;
+        [SerializeField, Range(0f, 1f)] private float volume = 1f;
 
         [Header("VFX")]
         [SerializeField] private ParticleSystem grantBurstPrefab;
@@ -61,7 +58,6 @@ namespace IntuitiveDesigns.ShootingRange
                 powerUps.Expired += OnExpired;
             }
 
-            if (combo != null) combo.MilestoneReached += OnMilestone;
             if (slowMotion != null) slowMotion.Changed += OnSlowMotion;
         }
 
@@ -73,22 +69,21 @@ namespace IntuitiveDesigns.ShootingRange
                 powerUps.Expired -= OnExpired;
             }
 
-            if (combo != null) combo.MilestoneReached -= OnMilestone;
             if (slowMotion != null) slowMotion.Changed -= OnSlowMotion;
-        }
-
-        private void OnMilestone(int chain)
-        {
-            Play(Pick(milestoneClips));
         }
 
         private void OnGranted(PowerUpKind kind, float seconds)
         {
             Play(Pick(ClipsFor(kind)));
 
+            Color colour = powerUps.Colour(kind);
             for (int i = 0; i < _bursts.Length; i++)
             {
-                if (_bursts[i] != null && _bursts[i].gameObject.activeInHierarchy) _bursts[i].Play(true);
+                var burst = _bursts[i];
+                if (burst == null || !burst.gameObject.activeInHierarchy) continue;
+
+                Tint(burst, colour);
+                burst.Play(true);
             }
 
             RefreshAuras();
@@ -113,13 +108,23 @@ namespace IntuitiveDesigns.ShootingRange
             bool buffed = powerUps != null &&
                           (powerUps.IsActive(PowerUpKind.FullAuto) || powerUps.IsActive(PowerUpKind.Scattershot));
 
+            PowerUpKind latest = PowerUpKind.FullAuto;
+            if (buffed) powerUps.TryLatest(out latest);
+
             for (int i = 0; i < _auras.Length; i++)
             {
                 var aura = _auras[i];
                 if (aura == null) continue;
 
-                if (buffed && !aura.isPlaying) aura.Play(true);
-                else if (!buffed && aura.isPlaying) aura.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+                if (buffed)
+                {
+                    Tint(aura, powerUps.Colour(latest));
+                    if (!aura.isPlaying) aura.Play(true);
+                }
+                else if (aura.isPlaying)
+                {
+                    aura.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+                }
             }
         }
 
@@ -129,8 +134,16 @@ namespace IntuitiveDesigns.ShootingRange
             {
                 case PowerUpKind.FullAuto: return fullAutoClips;
                 case PowerUpKind.Scattershot: return scattershotClips;
-                case PowerUpKind.DualWield: return dualWieldClips;
                 default: return slowMotionClips;
+            }
+        }
+
+        private static void Tint(ParticleSystem root, Color colour)
+        {
+            foreach (var system in root.GetComponentsInChildren<ParticleSystem>(true))
+            {
+                var main = system.main;
+                main.startColor = colour;
             }
         }
 

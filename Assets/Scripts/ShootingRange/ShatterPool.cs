@@ -4,8 +4,6 @@ using UnityEngine;
 
 namespace IntuitiveDesigns.ShootingRange
 {
-    /// Fixed pools, capped on purpose: fragment bursts are the classic Quest 2 frame spike, and a pool
-    /// that runs dry throws fewer pieces rather than allocating mid-round
     public class ShatterPool : MonoBehaviour
     {
         public static ShatterPool Instance { get; private set; }

@@ -79,9 +79,6 @@ namespace IntuitiveDesigns.ShootingRange
         private void Apply(float scale)
         {
             Time.timeScale = scale;
-
-            // Unity's own guidance, without this the physics step stays fixed in game time, so props
-            // update at a third of their normal rate and visibly judder through the slow down
             Time.fixedDeltaTime = _baseFixedDeltaTime * scale;
         }
     }

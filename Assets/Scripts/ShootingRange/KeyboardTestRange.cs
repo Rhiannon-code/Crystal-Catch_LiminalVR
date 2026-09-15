@@ -2,7 +2,6 @@ using UnityEngine;
 
 namespace IntuitiveDesigns.ShootingRange
 {
-    /// Desktop practice helper: re-stack the arena without leaving Play mode
     public class KeyboardTestRange : MonoBehaviour
     {
         [SerializeField] private Arena arena;
@@ -19,7 +18,7 @@ namespace IntuitiveDesigns.ShootingRange
             var powerUps = PowerUps.Instance;
             if (powerUps == null) return;
 
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PowerUps.KindCount; i++)
             {
                 if (Input.GetKeyDown(KeyCode.Alpha1 + i)) powerUps.Grant((PowerUpKind)i);
             }

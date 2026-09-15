@@ -24,7 +24,11 @@ namespace IntuitiveDesigns.ShootingRange
         [Header("Traffic (data)")]
         [SerializeField] private float minGap = 0.9f;
 
+        [Header("Threat")]
+        [SerializeField] private bool reachesPlayer;
+
         public TrackGroup Group { get { return group; } }
+        public bool ReachesPlayer { get { return reachesPlayer; } }
         public float Length { get { return length; } }
         public Vector3 Origin { get { return transform.position; } }
         public Vector3 Direction { get { return transform.forward; } }
@@ -43,8 +47,6 @@ namespace IntuitiveDesigns.ShootingRange
             return Origin + Direction * Mathf.Clamp(distance, 0f, length);
         }
 
-        /// Checked and committed separately so a dispatch that fails at a junction does not leave a
-        /// phantom booking on the rail. TrackGrid checks everything, then commits everything
         public bool CanAccept(float departTime, float speed)
         {
             Prune(departTime);
