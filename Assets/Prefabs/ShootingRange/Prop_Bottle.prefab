@@ -132,7 +132,10 @@ MonoBehaviour:
   solverIterations: 12
   sleepThreshold: 0.05
   clatterClips:
-  - {fileID: 8300000, guid: 664a2e3586cfc8d768655efbf0917d19, type: 3}
+  - {fileID: 8300000, guid: 56b4971c3d6c9e9199d846a9e1001105, type: 3}
+  - {fileID: 8300000, guid: a1b483b50f1c0bc0abf8402b4587dca6, type: 3}
+  - {fileID: 8300000, guid: c8e8433fb5e61097e954cefefaf82eee, type: 3}
+  - {fileID: 8300000, guid: 11c35f9b2cee4fbc7908bb64850eedcb, type: 3}
   minClatterSpeed: 1.2
   loudestClatterSpeed: 6
   clatterVolume: 0.5

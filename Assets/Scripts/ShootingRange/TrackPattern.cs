@@ -47,8 +47,6 @@ namespace IntuitiveDesigns.ShootingRange
             Add(into, rails[Random.Range(0, rails.Length)], 0f, 1f);
         }
 
-        /// Same speed on purpose, a train only holds its spacing if nothing in it can catch anything
-        /// else, and the rail would refuse the bookings otherwise
         private static void Gauntlet(TrackRail[] rails, List<Launch> into)
         {
             var rail = rails[Random.Range(0, rails.Length)];
